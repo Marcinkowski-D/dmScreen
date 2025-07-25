@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DM Screen View</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+        .fullscreen-image {
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+            background-color: black;
+        }
+    </style>
+</head>
+<body class="view-body">
+    <img id="display-image" class="fullscreen-image" src="" alt="Display Image">
+    
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    <script src="js/view.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+[project]
+name = "dmscreen"
+dynamic = ["version"]
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=2.0.0",
+    "flask-socketio>=5.0.0",
+    "pillow>=9.0.0",
+    "werkzeug>=2.0.0",
+    "python-engineio>=4.0.0",
+    "python-socketio>=5.0.0",
+    "eventlet>=0.30.0"
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dmScreen"]
+
+[project.scripts]
+server = "dmScreen.server:main"

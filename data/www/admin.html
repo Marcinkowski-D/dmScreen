@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DM Screen Admin</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>DM Screen Admin</h1>
+        
+        <div class="section">
+            <h2>Upload Images</h2>
+            <form id="upload-form">
+                <div class="form-group">
+                    <label for="image-files">Select Images:</label>
+                    <input type="file" id="image-files" name="files[]" accept="image/*" multiple required>
+                </div>
+                <div id="image-preview-container" style="display: none;">
+                    <h3>Preview and Edit Names</h3>
+                    <p>You can edit the names and remove images before uploading.</p>
+                    <table id="image-preview-table" class="image-preview-table">
+                        <thead>
+                            <tr>
+                                <th>Preview</th>
+                                <th>Name</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="image-preview-list">
+                            <!-- Images will be added here dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit" class="btn" id="upload-button" disabled>Upload Selected Images</button>
+            </form>
+        </div>
+        
+        <div class="section">
+            <h2>Image Gallery</h2>
+            <div id="gallery" class="gallery"></div>
+        </div>
+        
+        <div class="section">
+            <h2>Current Display Preview</h2>
+            <div class="preview-container">
+                <div id="preview-area">
+                    <img id="preview-image" src="" alt="No image displayed">
+                </div>
+                <div class="preview-controls">
+                    <p id="preview-status">No image is currently displayed.</p>
+                    <button id="reset-display" class="btn">Reset Display to Screensaver</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Settings</h2>
+            <div class="form-group">
+                <label for="screensaver">Screensaver Image:</label>
+                <select id="screensaver">
+                    <option value="">None</option>
+                </select>
+                <button id="save-settings" class="btn">Save Settings</button>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>WiFi Configuration</h2>
+            <div id="wifi-status">Checking WiFi status...</div>
+            <form id="wifi-form">
+                <div class="form-group">
+                    <label for="wifi-ssid">SSID:</label>
+                    <input type="text" id="wifi-ssid" name="ssid" placeholder="Network name">
+                </div>
+                <div class="form-group">
+                    <label for="wifi-password">Password:</label>
+                    <input type="password" id="wifi-password" name="password" placeholder="Network password">
+                </div>
+                <button type="submit" class="btn">Configure WiFi</button>
+            </form>
+        </div>
+    </div>
+    
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>
