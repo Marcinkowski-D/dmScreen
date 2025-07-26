@@ -1,10 +1,13 @@
 import os
+import shutil
 import uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory, redirect, url_for
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
 from PIL import Image
+
+import requests
 
 from dmScreen.database import Database
 # Import refactored modules
@@ -14,14 +17,13 @@ from dmScreen.wifi import register_wifi_routes, start_wifi_monitor
 BASE_DIR = os.getcwd()
 DATA_FOLDER = os.path.join(BASE_DIR, 'data')
 UPLOAD_FOLDER = os.path.join(DATA_FOLDER, 'uploads')
-WWW_FOLDER = os.path.join(DATA_FOLDER, 'www')
+WWW_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'www')
 DATABASE_FILE = os.path.join(DATA_FOLDER, 'database.json')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # Create necessary directories
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(WWW_FOLDER, exist_ok=True)
 
 # Initialize Flask app
 app = Flask(__name__, static_folder=WWW_FOLDER)
@@ -313,6 +315,7 @@ def main():
     # Initialize database
     print('initializing database')
     db = Database(DATABASE_FILE)
+
 
     # Register WiFi routes
     register_wifi_routes(app)
