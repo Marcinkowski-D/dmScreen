@@ -1,5 +1,6 @@
 import os
 import uuid
+import socket
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory, redirect, url_for
 from flask_socketio import SocketIO, emit
@@ -8,6 +9,16 @@ from PIL import Image
 import requests
 
 import importlib.metadata
+
+def get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
 
 from dmScreen.updater import check_for_update
 
@@ -278,7 +289,6 @@ def set_display_image():
         return jsonify({'error': str(e)}), 404
     
     # Notify clients
-    socketio.emit('display_changed', {'image_id': image_id})
     socketio.emit('settings_updated', settings)
     
     return jsonify({'success': True})
@@ -292,7 +302,8 @@ def reset_display():
         return jsonify({'error': str(e)}), 404
     
     # Notify clients
-    socketio.emit('display_changed', {'image_id': None})
+    database = db.get_database()
+    socketio.emit('settings_updated', database['settings'])
     
     return jsonify({'success': True})
 
@@ -333,7 +344,16 @@ def main():
         print('not linux!')
     
     # Start the server
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+
+
+    lan_ip = get_lan_ip()
+    print('running server on port 5000')
+    print(f'Local admin URL: http://127.0.0.1:5000/admin')
+    print(f'Local view URL: http://127.0.0.1:5000/view')
+    print(f'Network admin URL: http://{lan_ip}:5000/admin')
+    print(f'Network view URL: http://{lan_ip}:5000/view')
+    print('server listening...')
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
 
 if __name__ == "__main__":
     main()

@@ -237,3 +237,12 @@ textarea {
     border: 1px solid #ddd;
     border-radius: 4px;
 }
+
+/* Floating Button Styles */
+.floating-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}

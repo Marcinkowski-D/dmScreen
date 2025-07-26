@@ -63,20 +63,6 @@ socket.on('settings_updated', (settings) => {
     updateSettings(settings);
 });
 
-socket.on('display_changed', (data) => {
-    // Highlight the currently displayed image
-    document.querySelectorAll('.gallery-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    
-    if (data.image_id) {
-        const item = document.getElementById(`image-${data.image_id}`);
-        if (item) {
-            item.classList.add('active');
-        }
-    }
-});
-
 // Handle file selection
 function handleFileSelection(e) {
     const files = e.target.files;
@@ -449,6 +435,7 @@ function updateSettings(settings) {
 }
 
 function updatePreview(settings) {
+    console.log(settings);
     if (settings.current_image) {
         // Find the image in the gallery
         const image = document.querySelector(`#image-${settings.current_image} img`);
@@ -565,6 +552,8 @@ async function resetDisplay() {
         if (!response.ok) {
             throw new Error('Failed to reset display');
         }
+
+
         
     } catch (error) {
         alert(`Error: ${error.message}`);

@@ -51,11 +51,6 @@ socket.on('settings_updated', (newSettings) => {
     updateDisplay();
 });
 
-socket.on('display_changed', (data) => {
-    settings.current_image = data.image_id;
-    updateDisplay();
-});
-
 socket.on('image_added', (image) => {
     images.push(image);
 });
