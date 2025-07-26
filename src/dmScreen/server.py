@@ -9,31 +9,9 @@ import requests
 
 import importlib.metadata
 
-def get_current_version():
-    return importlib.metadata.version("dmScreen")
+from dmScreen.updater import check_for_update
 
-print(f"dmScreen version: {get_current_version()}")
-
-
-def get_latest_git_version():
-    repo = "Marcinkowski-D/dmScreen"
-    url = f"https://api.github.com/repos/{repo}/tags"
-    r = requests.get(url)
-    r.raise_for_status()
-    tags = r.json()
-    if tags:
-        return tags[0]['name']  # Most recent tag
-    return None
-
-def get_latest_commit_hash():
-    repo = "Marcinkowski-D/dmScreen"
-    url = f"https://api.github.com/repos/{repo}/commits/main"
-    r = requests.get(url)
-    r.raise_for_status()
-    return r.json()['sha'][:7]  # First 7 chars of the latest commit
-
-print(f"Latest git version: {get_latest_git_version()}")
-print(f"Latest commit hash: {get_latest_commit_hash()}")
+check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
