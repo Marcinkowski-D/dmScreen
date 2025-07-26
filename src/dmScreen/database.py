@@ -20,6 +20,8 @@ class Database:
     def __init__(self, db_file):
         self.db_file = db_file
 
+        ## TODO SOMEHOW DATABASE FILE IS NOT CREATED
+
     def init_database(self):
         if not os.path.exists(self.db_file):
             with open(self.db_file, 'w') as f:
