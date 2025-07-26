@@ -109,21 +109,51 @@ function updateDisplay(forceRefresh = false) {
             // Add timestamp to prevent caching if force refresh
             const timestamp = forceRefresh ? `?t=${Date.now()}` : '';
             
-            // Update the image source - use original path, not thumbnail
-            displayImage.src = `/img/${imageToShow.path}${timestamp}`;
+            // Two-stage loading process:
+            // 1. First load the thumbnail with fade-in effect
+            const thumbPath = imageToShow.thumb_path || `thumb_${imageToShow.path}`;
+            displayImage.src = `/img/${thumbPath}${timestamp}`;
             displayImage.alt = imageToShow.name;
             
-            // Wait for the image to load before fading in
+            // Wait for the thumbnail to load before fading in
             displayImage.onload = () => {
+                // Show the thumbnail with fade-in effect
                 displayImage.classList.remove('fade-out');
                 displayImage.classList.add('fade-in');
-                isTransitioning = false;
+                
+                // 2. Then load the full-size image in the background
+                const fullImage = new Image();
+                fullImage.src = `/img/${imageToShow.path}${timestamp}`;
+                
+                // When the full-size image is loaded, replace the thumbnail without fade effects
+                fullImage.onload = () => {
+                    // Replace the thumbnail with the full-size image (no transition)
+                    displayImage.src = fullImage.src;
+                    isTransitioning = false;
+                };
+                
+                fullImage.onerror = () => {
+                    console.error('Failed to load full-size image:', imageToShow.path);
+                    isTransitioning = false;
+                };
             };
             
-            // Handle image load errors
+            // Handle thumbnail load errors
             displayImage.onerror = () => {
-                console.error('Failed to load image:', imageToShow.path);
-                isTransitioning = false;
+                console.error('Failed to load thumbnail:', thumbPath);
+                
+                // Fallback to loading the original image directly
+                displayImage.src = `/img/${imageToShow.path}${timestamp}`;
+                displayImage.onload = () => {
+                    displayImage.classList.remove('fade-out');
+                    displayImage.classList.add('fade-in');
+                    isTransitioning = false;
+                };
+                
+                displayImage.onerror = () => {
+                    console.error('Failed to load image:', imageToShow.path);
+                    isTransitioning = false;
+                };
             };
         } else {
             // No image to display - hide the element completely
