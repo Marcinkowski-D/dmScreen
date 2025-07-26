@@ -2,3 +2,4 @@ data/uploads
 data/database.json
 .venv
 .idea
+__pycache__

@@ -33,9 +33,14 @@ To brew this potion, you will need:
 
 ## 🔮 Summoning the DM Screen
 
+1. Create a virtual environment in a folder of your choice
+   ```
+   uv init
+   uv venv
+   ```
 1. Install the arcane artifact directly:
    ```
-   pip install git+https://github.com/yourusername/dmScreen.git
+   uv pip install git+https://github.com/Marcinkowski-D/dmScreen.git
    ```
 
 2. Invoke the screen with the ancient command:
