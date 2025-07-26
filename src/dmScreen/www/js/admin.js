@@ -132,7 +132,9 @@ uploadForm.addEventListener('submit', async (e) => {
         alert('Please select at least one image to upload');
         return;
     }
-    
+
+    imagePreviewContainer.style.display = 'none';
+    imagePreviewList.innerHTML = '';
     // Disable upload button and show loading spinner
     uploadButton.disabled = true;
     uploadButton.innerHTML = '<span class="spinner"></span> Uploading...';
@@ -271,6 +273,12 @@ function updateGallery(images) {
 }
 
 function addImageToGallery(image) {
+    // Remove "No images uploaded yet" message if it exists
+    const noImagesMessage = gallery.querySelector('p');
+    if (noImagesMessage && noImagesMessage.textContent === 'No images uploaded yet.') {
+        gallery.innerHTML = '';
+    }
+    
     const item = document.createElement('div');
     item.className = 'gallery-item';
     item.id = `image-${image.id}`;
@@ -393,6 +401,11 @@ function removeImageFromGallery(imageId) {
     const option = Array.from(screensaverSelect.options).find(opt => opt.value === imageId);
     if (option) {
         option.remove();
+    }
+    
+    // Check if gallery is empty and show message if it is
+    if (gallery.querySelectorAll('.gallery-item').length === 0) {
+        gallery.innerHTML = '<p>No images uploaded yet.</p>';
     }
 }
 

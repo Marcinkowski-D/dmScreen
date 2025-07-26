@@ -89,12 +89,46 @@ class Database:
             rotated_img = rotated_img.resize((new_width, new_height), Image.LANCZOS)
             print(f"Resized rotated image to {new_width}x{new_height}")
             
-        rotated_img.save(path)
+        # Save as interlaced PNG
+        if path.lower().endswith('.png'):
+            rotated_img.save(path, format="PNG", interlace=1)
+        else:
+            # Get the filename without extension
+            base_name = os.path.splitext(path)[0]
+            new_path = f"{base_name}.png"
+            rotated_img.save(new_path, format="PNG", interlace=1)
+            # Update the path in the database if needed
+            if path != new_path:
+                image['path'] = os.path.basename(new_path)
+                path = new_path
 
         thumb_path = os.path.join(UPLOAD_FOLDER, image['thumb_path'])
         img = Image.open(thumb_path)
         rotated_img = img.rotate(-angle, expand=True)  # Negative angle for clockwise rotation
-        rotated_img.save(thumb_path)
+        
+        # Save thumbnail as interlaced PNG
+        if thumb_path.lower().endswith('.png'):
+            rotated_img.save(thumb_path, format="PNG", interlace=1)
+        else:
+            # Get the filename without extension
+            base_name = os.path.splitext(thumb_path)[0]
+            new_thumb_path = f"{base_name}.png"
+            rotated_img.save(new_thumb_path, format="PNG", interlace=1)
+            # Update the thumb_path in the database if needed
+            if thumb_path != new_thumb_path:
+                image['thumb_path'] = os.path.basename(new_thumb_path)
+                
+        # Save the database if we changed any paths
+        path_changed = False
+        if 'new_path' in locals() and path != new_path:
+            path_changed = True
+        
+        thumb_path_changed = False
+        if 'new_thumb_path' in locals() and thumb_path != new_thumb_path:
+            thumb_path_changed = True
+            
+        if path_changed or thumb_path_changed:
+            self.save_database(db)
 
     def update_settings(self, config):
         db = self.get_database()

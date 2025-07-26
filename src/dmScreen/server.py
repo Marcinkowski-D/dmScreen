@@ -104,7 +104,17 @@ def serve_img(path):
                         
                         # Create thumbnail
                         img.thumbnail((250, 250))
-                        img.save(file_path)
+                        
+                        # Save as interlaced PNG
+                        if file_path.lower().endswith('.png'):
+                            img.save(file_path, format="PNG", interlace=1)
+                        else:
+                            # Get the filename without extension
+                            base_name = os.path.splitext(file_path)[0]
+                            new_file_path = f"{base_name}.png"
+                            img.save(new_file_path, format="PNG", interlace=1)
+                            file_path = new_file_path
+                            path = os.path.basename(new_file_path)
                         
                         # Update database to include thumb_path
                         db.updateImageThumbnail(original_path, path)
@@ -151,11 +161,14 @@ def upload_image():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             
-            # Resize image if dimensions exceed 1920px
+            # Process image - resize if needed and convert to interlaced PNG
             try:
                 with Image.open(filepath) as img:
                     width, height = img.size
-                    if width > 1920 or height > 1920:
+                    # Determine if resizing is needed
+                    needs_resize = width > 1920 or height > 1920
+                    
+                    if needs_resize:
                         # Calculate new dimensions while maintaining aspect ratio
                         if width > height:
                             new_width = 1920
@@ -165,13 +178,31 @@ def upload_image():
                             new_width = int(width * (1920 / height))
                         
                         # Resize the image
-                        resized_img = img.resize((new_width, new_height), Image.LANCZOS)
-                        
-                        # Save the resized image
-                        resized_img.save(filepath)
-                        print(f"Resized image {filename} to {new_width}x{new_height}")
+                        processed_img = img.resize((new_width, new_height), Image.LANCZOS)
+                    else:
+                        # Use original image if no resizing needed
+                        processed_img = img.copy()
+                    
+                    # Save as interlaced PNG (3 levels of interlacing)
+                    # Convert to PNG if not already
+                    if filepath.lower().endswith('.png'):
+                        processed_img.save(filepath, format="PNG", interlace=True)
+                    else:
+                        # Get the filename without extension
+                        base_name = os.path.splitext(filepath)[0]
+                        new_filepath = f"{base_name}.png"
+                        processed_img.save(new_filepath, format="PNG", interlace=True)
+                        # Update the filepath and filename
+                        os.remove(filepath)  # Remove the original file
+                        filepath = new_filepath
+                        filename = os.path.basename(new_filepath)
+                    
+                    if needs_resize:
+                        print(f"Resized and saved image {filename} as interlaced PNG ({new_width}x{new_height})")
+                    else:
+                        print(f"Saved image {filename} as interlaced PNG")
             except Exception as e:
-                print(f"Error resizing image: {e}")
+                print(f"Error processing image: {e}")
             
             # Create thumbnail
             thumb_filename = f"thumb_{filename}"
@@ -182,8 +213,17 @@ def upload_image():
                     # Calculate new dimensions while maintaining aspect ratio
                     img.thumbnail((250, 250))
                     
-                    # Save the thumbnail, preserving transparency if present
-                    img.save(thumb_filepath)
+                    # Save the thumbnail as interlaced PNG, preserving transparency if present
+                    if thumb_filepath.lower().endswith('.png'):
+                        img.save(thumb_filepath, format="PNG", interlace=1)
+                    else:
+                        # Get the filename without extension
+                        base_name = os.path.splitext(thumb_filepath)[0]
+                        new_thumb_filepath = f"{base_name}.png"
+                        img.save(new_thumb_filepath, format="PNG", interlace=1)
+                        # Update the thumbnail filepath and filename
+                        thumb_filepath = new_thumb_filepath
+                        thumb_filename = os.path.basename(new_thumb_filepath)
             except Exception as e:
                 print(f"Error creating thumbnail: {e}")
                 # If thumbnail creation fails, use the original image path
