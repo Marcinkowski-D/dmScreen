@@ -267,7 +267,7 @@ function addImageToGallery(image) {
     const imagePath = image.thumb_path || image.path;
     
     item.innerHTML = `
-        <img src="/img/${imagePath}?t=${Date.now()}" alt="${image.name}" class="gallery-image" data-original-path="${image.path}">
+        <img src="/img/${imagePath}?t=${Date.now()}" alt="${image.name}" class="gallery-image" data-original-path="${image.path}" data-thumb-path="${imagePath}">
         <div class="gallery-controls">
             <div class="gallery-title" data-id="${image.id}">${image.name}</div>
             <div class="gallery-buttons">
@@ -442,8 +442,8 @@ function updatePreview(settings) {
         if (image) {
             console.log(image);
             // Use the original image path for the preview
-            const originalPath = image.dataset.originalPath;
-            previewImage.src = `/img/${originalPath}?t=${Date.now()}`;
+            const thumb_path = image.dataset.thumbPath;
+            previewImage.src = `/img/${thumb_path}?t=${Date.now()}`;
             previewImage.alt = image.alt;
             previewImage.style.display = 'block';
             previewStatus.textContent = `Currently displaying: ${image.alt}`;
@@ -462,8 +462,8 @@ function updatePreview(settings) {
         const image = document.querySelector(`#image-${settings.screensaver} img`);
         if (image) {
             // Use the original image path for the preview
-            const originalPath = image.dataset.originalPath;
-            previewImage.src = `/img/${originalPath}?t=${Date.now()}`;
+            const thumb_path = image.dataset.thumbPath;
+            previewImage.src = `/img/${thumb_path}?t=${Date.now()}`;
             previewImage.alt = image.alt;
             previewImage.style.display = 'block';
             previewStatus.textContent = `Showing screensaver: ${screensaverName}`;
