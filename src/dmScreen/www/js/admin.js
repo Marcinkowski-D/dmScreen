@@ -133,6 +133,13 @@ uploadForm.addEventListener('submit', async (e) => {
         return;
     }
     
+    // Disable upload button and show loading spinner
+    uploadButton.disabled = true;
+    uploadButton.innerHTML = '<span class="spinner"></span> Uploading...';
+    
+    // Hide image preview during upload
+    previewImage.style.display = 'none';
+    
     const formData = new FormData();
     const files = imageFilesInput.files;
     
@@ -163,10 +170,15 @@ uploadForm.addEventListener('submit', async (e) => {
         imagePreviewContainer.style.display = 'none';
         imagePreviewList.innerHTML = '';
         uploadButton.disabled = true;
+        // Reset button text
+        uploadButton.innerHTML = 'Upload Selected Images';
         
         alert('Images uploaded successfully');
         
     } catch (error) {
+        // Reset button state on error
+        uploadButton.disabled = false;
+        uploadButton.innerHTML = 'Upload Selected Images';
         alert(`Error: ${error.message}`);
     }
 });

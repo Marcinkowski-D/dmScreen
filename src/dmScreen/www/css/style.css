@@ -246,3 +246,20 @@ textarea {
     z-index: 1000;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
+
+/* Spinner Animation */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
