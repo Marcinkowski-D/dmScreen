@@ -179,16 +179,10 @@ def upload_image():
             try:
                 # Open the image and create a thumbnail
                 with Image.open(filepath) as img:
-                    # Convert to RGB if image has transparency (like PNG)
-                    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                        background = Image.new('RGB', img.size, (255, 255, 255))
-                        background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
-                        img = background
-                    
                     # Calculate new dimensions while maintaining aspect ratio
                     img.thumbnail((250, 250))
                     
-                    # Save the thumbnail
+                    # Save the thumbnail, preserving transparency if present
                     img.save(thumb_filepath)
             except Exception as e:
                 print(f"Error creating thumbnail: {e}")

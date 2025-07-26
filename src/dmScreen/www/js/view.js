@@ -18,6 +18,10 @@ style.textContent = `
     .hidden {
         display: none;
     }
+    /* Prevent background visibility during image transitions */
+    #display-image {
+        background-color: black;
+    }
 `;
 document.head.appendChild(style);
 
@@ -96,12 +100,17 @@ function updateDisplay(forceRefresh = false) {
         imageToShow = images.find(img => img.id === settings.screensaver);
     }
     
-    // First fade out the current image
-    displayImage.classList.remove('fade-in');
-    displayImage.classList.add('fade-out');
+    // Track if we're switching from thumbnail to full image (no fade needed)
+    const isSwitchingToFullImage = displayImage.dataset.loadingFullImage === 'true';
     
-    // Wait for fade out to complete
-    setTimeout(() => {
+    if (!isSwitchingToFullImage) {
+        // Fade out the current image (unless we're just switching from thumbnail to full)
+        displayImage.classList.remove('fade-in');
+        displayImage.classList.add('fade-out');
+    }
+    
+    // Function to load the image
+    const loadImage = () => {
         if (imageToShow) {
             // If image was hidden, show it first
             displayImage.classList.remove('hidden');
@@ -109,51 +118,28 @@ function updateDisplay(forceRefresh = false) {
             // Add timestamp to prevent caching if force refresh
             const timestamp = forceRefresh ? `?t=${Date.now()}` : '';
             
-            // Two-stage loading process:
-            // 1. First load the thumbnail with fade-in effect
-            const thumbPath = imageToShow.thumb_path || `thumb_${imageToShow.path}`;
-            displayImage.src = `/img/${thumbPath}${timestamp}`;
+            // Load the full-size image directly
+            const imagePath = `/img/${imageToShow.path}${timestamp}`;
             displayImage.alt = imageToShow.name;
             
-            // Wait for the thumbnail to load before fading in
+            // Set the src to load the image
+            displayImage.src = imagePath;
+            
+            // When the image loads, fade it in
             displayImage.onload = () => {
-                // Show the thumbnail with fade-in effect
                 displayImage.classList.remove('fade-out');
                 displayImage.classList.add('fade-in');
-                
-                // 2. Then load the full-size image in the background
-                const fullImage = new Image();
-                fullImage.src = `/img/${imageToShow.path}${timestamp}`;
-                
-                // When the full-size image is loaded, replace the thumbnail without fade effects
-                fullImage.onload = () => {
-                    // Replace the thumbnail with the full-size image (no transition)
-                    displayImage.src = fullImage.src;
-                    isTransitioning = false;
-                };
-                
-                fullImage.onerror = () => {
-                    console.error('Failed to load full-size image:', imageToShow.path);
-                    isTransitioning = false;
-                };
+                isTransitioning = false;
+                // Clear the loading flag
+                delete displayImage.dataset.loadingFullImage;
             };
             
-            // Handle thumbnail load errors
+            // Handle image load errors
             displayImage.onerror = () => {
-                console.error('Failed to load thumbnail:', thumbPath);
-                
-                // Fallback to loading the original image directly
-                displayImage.src = `/img/${imageToShow.path}${timestamp}`;
-                displayImage.onload = () => {
-                    displayImage.classList.remove('fade-out');
-                    displayImage.classList.add('fade-in');
-                    isTransitioning = false;
-                };
-                
-                displayImage.onerror = () => {
-                    console.error('Failed to load image:', imageToShow.path);
-                    isTransitioning = false;
-                };
+                console.error('Failed to load image:', imagePath);
+                isTransitioning = false;
+                // Clear the loading flag
+                delete displayImage.dataset.loadingFullImage;
             };
         } else {
             // No image to display - hide the element completely
@@ -161,6 +147,16 @@ function updateDisplay(forceRefresh = false) {
             displayImage.src = '';
             displayImage.alt = 'No image selected';
             isTransitioning = false;
+            // Clear the loading flag
+            delete displayImage.dataset.loadingFullImage;
         }
-    }, 500); // Match this with the CSS transition duration
+    };
+    
+    if (isSwitchingToFullImage) {
+        // If we're just switching from thumbnail to full image, do it immediately
+        loadImage();
+    } else {
+        // Otherwise wait for fade out to complete
+        setTimeout(loadImage, 500); // Match this with the CSS transition duration
+    }
 }
