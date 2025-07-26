@@ -16,6 +16,7 @@ This mystical device allows you to maintain the atmosphere of your adventure whi
 - **Image Repository of Holding**: Upload and manage an (un)limited collection of images
 - **Instant Transmission Spell**: Real-time updates to the player view using Socket.IO magic
 - **Arcane Thumbnail Creation**: Automatic generation of thumbnails for faster loading
+- **Dimensional Constraint Spell**: Automatically resizes large images to a maximum of 1920px width/height
 - **Screensaver Illusion**: Configure a default image to display when no specific image is selected
 - **Mystical WiFi Configuration**: Set up network connectivity for your magical device
 - **Rotation Cantrip**: Rotate images to the perfect orientation

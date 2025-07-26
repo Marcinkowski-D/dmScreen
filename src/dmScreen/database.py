@@ -73,6 +73,22 @@ class Database:
         path = os.path.join(UPLOAD_FOLDER, image['path'])
         img = Image.open(path)
         rotated_img = img.rotate(-angle, expand=True)  # Negative angle for clockwise rotation
+        
+        # Check if rotated image exceeds 1920px and resize if needed
+        width, height = rotated_img.size
+        if width > 1920 or height > 1920:
+            # Calculate new dimensions while maintaining aspect ratio
+            if width > height:
+                new_width = 1920
+                new_height = int(height * (1920 / width))
+            else:
+                new_height = 1920
+                new_width = int(width * (1920 / height))
+            
+            # Resize the image
+            rotated_img = rotated_img.resize((new_width, new_height), Image.LANCZOS)
+            print(f"Resized rotated image to {new_width}x{new_height}")
+            
         rotated_img.save(path)
 
         thumb_path = os.path.join(UPLOAD_FOLDER, image['thumb_path'])
