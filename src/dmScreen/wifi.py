@@ -30,9 +30,18 @@ def create_adhoc_network():
         # Stop any existing hostapd and dnsmasq services
         subprocess.run(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
         
-        # Configure hostapd
-        with open('/etc/hostapd/hostapd.conf', 'w') as f:
-            f.write("""interface=wlan0
+        # Ensure hostapd directory exists
+        import os
+        hostapd_dir = '/etc/hostapd'
+        
+        # Try to create the directory using sudo
+        try:
+            if not os.path.exists(hostapd_dir):
+                subprocess.run(['sudo', 'mkdir', '-p', hostapd_dir], check=True)
+                print(f"Created directory: {hostapd_dir}")
+                
+            # Use sudo to write the configuration file
+            hostapd_conf = """interface=wlan0
 driver=nl80211
 ssid=DMScreen
 hw_mode=g
@@ -46,13 +55,41 @@ wpa_passphrase=dmscreen123
 wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP
 rsn_pairwise=CCMP
-""")
+"""
+            # Write to a temporary file first
+            with open('hostapd.conf.tmp', 'w') as f:
+                f.write(hostapd_conf)
+            
+            # Then use sudo to move it to the correct location
+            subprocess.run(['sudo', 'mv', 'hostapd.conf.tmp', '/etc/hostapd/hostapd.conf'], check=True)
+            print("Hostapd configuration written successfully")
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Failed to create hostapd configuration: {e}")
+            
+        # Configure hostapd (this is now done above using a different approach)
         
         # Configure dnsmasq
-        with open('/etc/dnsmasq.conf', 'w') as f:
-            f.write("""interface=wlan0
+        dnsmasq_dir = '/etc'
+        
+        # Try to create the directory using sudo (though /etc should always exist)
+        try:
+            if not os.path.exists(dnsmasq_dir):
+                subprocess.run(['sudo', 'mkdir', '-p', dnsmasq_dir], check=True)
+                print(f"Created directory: {dnsmasq_dir}")
+            
+            # Use sudo to write the configuration file
+            dnsmasq_conf = """interface=wlan0
 dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
-""")
+"""
+            # Write to a temporary file first
+            with open('dnsmasq.conf.tmp', 'w') as f:
+                f.write(dnsmasq_conf)
+            
+            # Then use sudo to move it to the correct location
+            subprocess.run(['sudo', 'mv', 'dnsmasq.conf.tmp', '/etc/dnsmasq.conf'], check=True)
+            print("Dnsmasq configuration written successfully")
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Failed to create dnsmasq configuration: {e}")
         
         # Configure network interface
         subprocess.run(['sudo', 'ifconfig', 'wlan0', '192.168.4.1', 'netmask', '255.255.255.0'])
@@ -60,7 +97,16 @@ dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
         # Start services
         subprocess.run(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
         
+        print("Ad-hoc network created successfully")
         return True
+    except FileNotFoundError as e:
+        print(f"Error creating ad-hoc network - File or directory not found: {e}")
+        print("Make sure hostapd and dnsmasq are installed: sudo apt-get install hostapd dnsmasq")
+        return False
+    except PermissionError as e:
+        print(f"Error creating ad-hoc network - Permission denied: {e}")
+        print("Make sure the script is run with sufficient privileges")
+        return False
     except Exception as e:
         print(f"Error creating ad-hoc network: {e}")
         return False

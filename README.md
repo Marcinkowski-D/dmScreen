@@ -89,6 +89,16 @@ The arcane artifact possesses a powerful nomadic enchantment, allowing it to ada
 
 This nomadic enchantment ensures that when you transport your screen to fellow wizards' towers, you may either use it in isolation or bind it to any local magical network.
 
+#### Prerequisites for Adhoc Network Functionality
+
+To enable the magical aura (adhoc network) functionality, you must first install these mystical components:
+
+```
+sudo apt-get install hostapd dnsmasq
+```
+
+These components are required for creating and managing the adhoc network when no WiFi connection is available.
+
 ### Custom Database Location
 
 You can specify a custom location for the database file by setting the `DM_SCREEN_DB` environment variable:
