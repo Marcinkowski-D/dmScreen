@@ -10,6 +10,7 @@ def check_wifi_connection():
     try:
         # This command works on Raspberry Pi with Raspbian
         result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True)
+        print(result.stdout.strip())
         return result.stdout.strip() != ""
     except:
         return False
