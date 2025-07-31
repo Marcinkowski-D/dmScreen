@@ -13,6 +13,15 @@ def check_wifi_connection():
         return result.stdout.strip() != ""
     except:
         return False
+        
+def check_adhoc_network():
+    """Check if adhoc network is active"""
+    try:
+        # Check if hostapd service is running
+        result = subprocess.run(['systemctl', 'is-active', 'hostapd'], capture_output=True, text=True)
+        return result.stdout.strip() == "active"
+    except:
+        return False
 
 def create_adhoc_network():
     """Create an ad-hoc network if WiFi is not connected"""
@@ -97,9 +106,19 @@ def register_wifi_routes(app):
     @app.route('/api/wifi/status', methods=['GET'])
     def get_wifi_status():
         connected = check_wifi_connection()
+        adhoc_active = False
+        adhoc_ssid = None
+        
+        if not connected:
+            adhoc_active = check_adhoc_network()
+            if adhoc_active:
+                adhoc_ssid = "DMScreen"  # This is the SSID set in create_adhoc_network()
+                
         return jsonify({
             'connected': connected,
-            'ssid': subprocess.run(['iwgetid', '-r'], capture_output=True, text=True).stdout.strip() if connected else None
+            'ssid': subprocess.run(['iwgetid', '-r'], capture_output=True, text=True).stdout.strip() if connected else None,
+            'adhoc_active': adhoc_active,
+            'adhoc_ssid': adhoc_ssid
         })
 
     @app.route('/api/wifi/configure', methods=['POST'])
