@@ -18,17 +18,21 @@ def check_wifi_connection():
 def check_adhoc_network():
     """Check if adhoc network is active"""
     try:
-        # Check if hostapd service is running
-        result = subprocess.run(['systemctl', 'is-active', 'hostapd'], capture_output=True, text=True)
-        return result.stdout.strip() == "active"
+        # Check if hostapd process is running
+        result = subprocess.run(['pgrep', 'hostapd'], capture_output=True, text=True)
+        return result.returncode == 0
     except:
         return False
 
 def create_adhoc_network():
     """Create an ad-hoc network if WiFi is not connected"""
     try:
-        # Stop any existing hostapd and dnsmasq services
-        subprocess.run(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
+        # Stop any existing hostapd and dnsmasq processes
+        try:
+            subprocess.run(['sudo', 'pkill', 'hostapd'], capture_output=True)
+            subprocess.run(['sudo', 'pkill', 'dnsmasq'], capture_output=True)
+        except Exception as e:
+            print(f"Warning when stopping existing processes: {e}")
         
         # Ensure hostapd directory exists
         import os
@@ -66,8 +70,6 @@ rsn_pairwise=CCMP
         except subprocess.CalledProcessError as e:
             raise Exception(f"Failed to create hostapd configuration: {e}")
             
-        # Configure hostapd (this is now done above using a different approach)
-        
         # Configure dnsmasq
         dnsmasq_dir = '/etc'
         
@@ -94,8 +96,24 @@ dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
         # Configure network interface
         subprocess.run(['sudo', 'ifconfig', 'wlan0', '192.168.4.1', 'netmask', '255.255.255.0'])
         
-        # Start services
-        subprocess.run(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
+        # Start services directly as processes instead of using systemctl
+        try:
+            # Start hostapd in the background
+            subprocess.Popen(['sudo', 'hostapd', '/etc/hostapd/hostapd.conf'], 
+                            stdout=subprocess.DEVNULL, 
+                            stderr=subprocess.DEVNULL)
+            
+            # Start dnsmasq in the background
+            subprocess.Popen(['sudo', 'dnsmasq', '-C', '/etc/dnsmasq.conf'],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+            
+            # Give the processes a moment to start
+            time.sleep(2)
+        except FileNotFoundError:
+            print("Error: hostapd or dnsmasq not found. Please install them with:")
+            print("sudo apt-get install hostapd dnsmasq")
+            return False
         
         print("Ad-hoc network created successfully")
         return True
@@ -114,8 +132,12 @@ dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
 def configure_wifi(ssid, password):
     """Configure WiFi with provided credentials"""
     try:
-        # Stop ad-hoc network if running
-        subprocess.run(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
+        # Stop ad-hoc network processes if running
+        try:
+            subprocess.run(['sudo', 'pkill', 'hostapd'], capture_output=True)
+            subprocess.run(['sudo', 'pkill', 'dnsmasq'], capture_output=True)
+        except Exception as e:
+            print(f"Warning when stopping existing processes: {e}")
         
         # Update wpa_supplicant configuration
         with open('/etc/wpa_supplicant/wpa_supplicant.conf', 'w') as f:
