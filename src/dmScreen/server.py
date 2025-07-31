@@ -393,7 +393,7 @@ def main():
 
     print('looking if linux')
     # Start WiFi monitoring in background (only on Raspberry Pi)
-    if os.path.exists('/etc/raspbian-release'):
+    if "Raspbian" in os.uname().version:
         print('is linux!')
         start_wifi_monitor()
     else:
