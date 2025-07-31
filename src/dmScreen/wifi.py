@@ -23,6 +23,40 @@ def check_adhoc_network():
         return result.returncode == 0
     except:
         return False
+        
+def verify_adhoc_network_functionality():
+    """Verify that the ad-hoc network is functioning correctly"""
+    try:
+        # Check if hostapd and dnsmasq processes are running
+        hostapd_running = subprocess.run(['pgrep', 'hostapd'], capture_output=True).returncode == 0
+        dnsmasq_running = subprocess.run(['pgrep', 'dnsmasq'], capture_output=True).returncode == 0
+        
+        if not (hostapd_running and dnsmasq_running):
+            print("Ad-hoc network verification failed: Required processes not running")
+            return False
+            
+        # Check if wlan0 interface has the correct IP address
+        ifconfig_result = subprocess.run(['ifconfig', 'wlan0'], capture_output=True, text=True)
+        if '192.168.4.1' not in ifconfig_result.stdout:
+            print("Ad-hoc network verification failed: wlan0 interface doesn't have the correct IP")
+            return False
+            
+        # Check if the network is broadcasting by scanning for the SSID
+        # This might not work on all systems as it depends on the wireless tools available
+        try:
+            scan_result = subprocess.run(['sudo', 'iwlist', 'wlan0', 'scan'], capture_output=True, text=True)
+            if 'DMScreen' not in scan_result.stdout:
+                print("Ad-hoc network verification failed: SSID not found in scan results")
+                return False
+        except:
+            # If scanning fails, we'll rely on the other checks
+            print("Warning: Could not scan for networks, skipping SSID verification")
+        
+        print("Ad-hoc network verification successful")
+        return True
+    except Exception as e:
+        print(f"Error verifying ad-hoc network: {e}")
+        return False
 
 def create_adhoc_network():
     """Create an ad-hoc network if WiFi is not connected"""
@@ -110,13 +144,18 @@ dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
             
             # Give the processes a moment to start
             time.sleep(2)
+        
+            # Verify that the ad-hoc network is functioning correctly
+            if verify_adhoc_network_functionality():
+                print("Ad-hoc network created and verified successfully")
+                return True
+            else:
+                print("Ad-hoc network created but verification failed")
+                return False
         except FileNotFoundError:
             print("Error: hostapd or dnsmasq not found. Please install them with:")
             print("sudo apt-get install hostapd dnsmasq")
             return False
-        
-        print("Ad-hoc network created successfully")
-        return True
     except FileNotFoundError as e:
         print(f"Error creating ad-hoc network - File or directory not found: {e}")
         print("Make sure hostapd and dnsmasq are installed: sudo apt-get install hostapd dnsmasq")
@@ -177,17 +216,21 @@ def register_wifi_routes(app):
         connected = check_wifi_connection()
         adhoc_active = False
         adhoc_ssid = None
+        adhoc_verified = False
         
         if not connected:
             adhoc_active = check_adhoc_network()
             if adhoc_active:
                 adhoc_ssid = "DMScreen"  # This is the SSID set in create_adhoc_network()
+                # Verify the functionality of the ad-hoc network
+                adhoc_verified = verify_adhoc_network_functionality()
                 
         return jsonify({
             'connected': connected,
             'ssid': subprocess.run(['iwgetid', '-r'], capture_output=True, text=True).stdout.strip() if connected else None,
             'adhoc_active': adhoc_active,
-            'adhoc_ssid': adhoc_ssid
+            'adhoc_ssid': adhoc_ssid,
+            'adhoc_verified': adhoc_verified
         })
 
     @app.route('/api/wifi/configure', methods=['POST'])
