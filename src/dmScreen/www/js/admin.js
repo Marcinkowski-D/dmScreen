@@ -582,7 +582,7 @@ function updatePreview(settings) {
         if (image) {
             // Use the original image path for the preview
             const thumb_path = image.dataset.thumbPath;
-            previewImage.src = `/img/${thumb_path}?t=${Date.now()}`;
+            previewImage.src = `/img/crop_${thumb_path}?t=${Date.now()}`;
             previewImage.alt = image.alt;
             previewImage.style.display = 'block';
             previewStatus.textContent = `Showing screensaver: ${screensaverName}`;
