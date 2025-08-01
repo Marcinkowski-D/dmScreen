@@ -104,7 +104,6 @@ source = { editable = "." }
 dependencies = [
     { name = "eventlet" },
     { name = "flask" },
-    { name = "flask-socketio" },
     { name = "pillow" },
     { name = "python-engineio" },
     { name = "python-socketio" },
@@ -116,7 +115,6 @@ dependencies = [
 requires-dist = [
     { name = "eventlet", specifier = ">=0.30.0" },
     { name = "flask", specifier = ">=2.0.0" },
-    { name = "flask-socketio", specifier = ">=5.0.0" },
     { name = "pillow", specifier = ">=9.0.0" },
     { name = "python-engineio", specifier = ">=4.0.0" },
     { name = "python-socketio", specifier = ">=5.0.0" },
@@ -161,19 +159,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c0/de/e47735752347f4128bcf354e0da07ef311a78244eba9e3dc1d4a5ab21a98/flask-3.1.1.tar.gz", hash = "sha256:284c7b8f2f58cb737f0cf1c30fd7eaf0ccfcde196099d24ecede3fc2005aa59e", size = 753440, upload_time = "2025-05-13T15:01:17.447Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3d/68/9d4508e893976286d2ead7f8f571314af6c2037af34853a30fd769c02e9d/flask-3.1.1-py3-none-any.whl", hash = "sha256:07aae2bb5eaf77993ef57e357491839f5fd9f4dc281593a81a9e4d79a24f295c", size = 103305, upload_time = "2025-05-13T15:01:15.591Z" },
-]
-
-[[package]]
-name = "flask-socketio"
-version = "5.5.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "flask" },
-    { name = "python-socketio" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d1/1f/54d3de4982df695682af99c65d4b89f8a46fe6739780c5a68690195835a0/flask_socketio-5.5.1.tar.gz", hash = "sha256:d946c944a1074ccad8e99485a6f5c79bc5789e3ea4df0bb9c864939586c51ec4", size = 37401, upload_time = "2025-01-06T19:49:59.056Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/38/1b75b3ba3452860211ec87710f9854112911a436ee4d155533e0b83b5cd9/Flask_SocketIO-5.5.1-py3-none-any.whl", hash = "sha256:35a50166db44d055f68021d6ec32cb96f1f925cd82de4504314be79139ea846f", size = 18259, upload_time = "2025-01-06T19:49:56.555Z" },
 ]
 
 [[package]]

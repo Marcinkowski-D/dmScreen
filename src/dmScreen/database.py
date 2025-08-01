@@ -13,6 +13,11 @@ DEFAULT_DATABASE = {
         "current_image": None
     }
 }
+
+# Default values for image transformation properties
+DEFAULT_ROTATE = 0
+DEFAULT_MIRROR = {"h": False, "v": False}
+DEFAULT_CROP = None  # Will be calculated based on image dimensions
 db_file = None
 
 class Database:
@@ -36,6 +41,14 @@ class Database:
             json.dump(data, f, indent=4)
 
     def appendImage(self, image_data):
+        # Add default transformation properties if not present
+        if 'rotate' not in image_data:
+            image_data['rotate'] = DEFAULT_ROTATE
+        if 'mirror' not in image_data:
+            image_data['mirror'] = DEFAULT_MIRROR.copy()
+        if 'crop' not in image_data:
+            image_data['crop'] = DEFAULT_CROP
+            
         db = self.get_database()
         db["images"].append(image_data)
         self.save_database(db)
@@ -61,74 +74,72 @@ class Database:
         self.save_database(db)
         return image
 
-    def rotateImage(self, image_id, angle, UPLOAD_FOLDER):
+    def updateImageTransform(self, image_id, transform_data):
+        """
+        Update image transformation metadata (rotate, mirror, crop)
+        
+        Args:
+            image_id: The ID of the image to update
+            transform_data: Dictionary containing transformation data
+                - rotate: Rotation angle (0, 90, 180, -90)
+                - mirror: Dictionary with h and v boolean values
+                - crop: Dictionary with w, x, y values
+        
+        Returns:
+            Updated image data or error response
+        """
         db = self.get_database()
         # Find the image
         image = next((img for img in db['images'] if img['id'] == image_id), None)
         if not image:
-            return jsonify({'error': 'Image not found'}), 404
-
-        # Get rotation angle
-        # Open and rotate the image
-        path = os.path.join(UPLOAD_FOLDER, image['path'])
-        img = Image.open(path)
-        rotated_img = img.rotate(-angle, expand=True)  # Negative angle for clockwise rotation
-        
-        # Check if rotated image exceeds 1920px and resize if needed
-        width, height = rotated_img.size
-        if width > 1920 or height > 1920:
-            # Calculate new dimensions while maintaining aspect ratio
-            if width > height:
-                new_width = 1920
-                new_height = int(height * (1920 / width))
+            return {'error': 'Image not found'}, 404
+            
+        # Update rotation if provided
+        if 'rotate' in transform_data:
+            # Ensure rotation is one of the allowed values
+            allowed_rotations = [0, 90, 180, -90]
+            rotation = transform_data['rotate']
+            if rotation in allowed_rotations:
+                image['rotate'] = rotation
             else:
-                new_height = 1920
-                new_width = int(width * (1920 / height))
-            
-            # Resize the image
-            rotated_img = rotated_img.resize((new_width, new_height), Image.LANCZOS)
-            print(f"Resized rotated image to {new_width}x{new_height}")
-            
-        # Save as interlaced PNG
-        if path.lower().endswith('.png'):
-            rotated_img.save(path, format="PNG", interlace=1)
-        else:
-            # Get the filename without extension
-            base_name = os.path.splitext(path)[0]
-            new_path = f"{base_name}.png"
-            rotated_img.save(new_path, format="PNG", interlace=1)
-            # Update the path in the database if needed
-            if path != new_path:
-                image['path'] = os.path.basename(new_path)
-                path = new_path
-
-        thumb_path = os.path.join(UPLOAD_FOLDER, image['thumb_path'])
-        img = Image.open(thumb_path)
-        rotated_img = img.rotate(-angle, expand=True)  # Negative angle for clockwise rotation
-        
-        # Save thumbnail as interlaced PNG
-        if thumb_path.lower().endswith('.png'):
-            rotated_img.save(thumb_path, format="PNG", interlace=1)
-        else:
-            # Get the filename without extension
-            base_name = os.path.splitext(thumb_path)[0]
-            new_thumb_path = f"{base_name}.png"
-            rotated_img.save(new_thumb_path, format="PNG", interlace=1)
-            # Update the thumb_path in the database if needed
-            if thumb_path != new_thumb_path:
-                image['thumb_path'] = os.path.basename(new_thumb_path)
+                return {'error': 'Invalid rotation value'}, 400
                 
-        # Save the database if we changed any paths
-        path_changed = False
-        if 'new_path' in locals() and path != new_path:
-            path_changed = True
+        # Update mirror if provided
+        if 'mirror' in transform_data:
+            mirror_data = transform_data['mirror']
+            if isinstance(mirror_data, dict) and 'h' in mirror_data and 'v' in mirror_data:
+                image['mirror'] = {
+                    'h': bool(mirror_data['h']),
+                    'v': bool(mirror_data['v'])
+                }
+            else:
+                return {'error': 'Invalid mirror data'}, 400
+                
+        # Update crop if provided
+        if 'crop' in transform_data:
+            crop_data = transform_data['crop']
+            if isinstance(crop_data, dict) and 'w' in crop_data and 'x' in crop_data and 'y' in crop_data:
+                image['crop'] = {
+                    'w': int(crop_data['w']),
+                    'x': int(crop_data['x']),
+                    'y': int(crop_data['y'])
+                }
+            else:
+                return {'error': 'Invalid crop data'}, 400
+                
+        # Save the updated database
+        self.save_database(db)
+        return image
         
-        thumb_path_changed = False
-        if 'new_thumb_path' in locals() and thumb_path != new_thumb_path:
-            thumb_path_changed = True
-            
-        if path_changed or thumb_path_changed:
-            self.save_database(db)
+    # Keep the old method for backward compatibility, but make it use the new approach
+    def rotateImage(self, image_id, angle, UPLOAD_FOLDER=None):
+        """Legacy method that now uses the metadata approach instead of physical rotation"""
+        # Convert angle to one of the allowed values (0, 90, 180, -90)
+        allowed_angles = [0, 90, 180, -90]
+        closest_angle = min(allowed_angles, key=lambda x: abs(x - angle % 360))
+        
+        # Update the rotation metadata
+        return self.updateImageTransform(image_id, {'rotate': closest_angle})
 
     def update_settings(self, config):
         db = self.get_database()

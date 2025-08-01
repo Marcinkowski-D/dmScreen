@@ -10,7 +10,6 @@ def check_wifi_connection():
     try:
         # This command works on Raspberry Pi with Raspbian
         result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True)
-        print(result.stdout.strip())
         return result.stdout.strip() != ""
     except:
         return False
@@ -38,8 +37,7 @@ def create_adhoc_network():
         try:
             if not os.path.exists(hostapd_dir):
                 subprocess.run(['sudo', 'mkdir', '-p', hostapd_dir], check=True)
-                print(f"Created directory: {hostapd_dir}")
-                
+
             # Use sudo to write the configuration file
             hostapd_conf = """interface=wlan0
 driver=nl80211
@@ -75,8 +73,7 @@ rsn_pairwise=CCMP
         try:
             if not os.path.exists(dnsmasq_dir):
                 subprocess.run(['sudo', 'mkdir', '-p', dnsmasq_dir], check=True)
-                print(f"Created directory: {dnsmasq_dir}")
-            
+
             # Use sudo to write the configuration file
             dnsmasq_conf = """interface=wlan0
 dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h

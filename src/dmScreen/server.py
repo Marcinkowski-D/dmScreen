@@ -1,9 +1,19 @@
 import os
 import uuid
 import socket
+import time
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, redirect, url_for
-from flask_socketio import SocketIO, emit
+from io import BytesIO
+
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    send_from_directory,
+    redirect,
+    url_for,
+    send_file,
+)
 from werkzeug.utils import secure_filename
 from PIL import Image
 import requests
@@ -44,12 +54,17 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app = Flask(__name__, static_folder=WWW_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max upload
-socketio = SocketIO(app, cors_allowed_origins="*")
 
 db: Database = None
+last_update_timestamp = time.time()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def update_timestamp():
+    global last_update_timestamp
+    print('setting timestamp')
+    last_update_timestamp = time.time()
 
 # Routes
 @app.route('/')
@@ -58,25 +73,16 @@ def index():
 
 @app.route('/admin')
 def admin():
-    print('Searching for admin.html')
-    print(os.getcwd())
-    print(os.path.exists('data/www/admin.html'))
-    print(os.path.isabs(WWW_FOLDER))
-    print(os.path.exists(WWW_FOLDER))
-
     admin_path = os.path.join(WWW_FOLDER, 'admin.html')
     if os.path.exists(admin_path):
-        print('found admin.html')
         return send_from_directory(WWW_FOLDER, 'admin.html')
     else:
         return f"File not found: {admin_path}", 404
 
 @app.route('/view')
 def view():
-    print('Searching for view.html')
     view_path = os.path.join(WWW_FOLDER, 'view.html')
     if os.path.exists(view_path):
-        print('found view.html')
         return send_from_directory(WWW_FOLDER, 'view.html')
     else:
         return f"File not found: {view_path}", 404
@@ -85,6 +91,10 @@ def view():
 
 @app.route('/img/<path:path>')
 def serve_img(path):
+    crop = False
+    if path.startswith('crop_'):
+        crop = True
+        path = path[5:]
     file_path = os.path.join(UPLOAD_FOLDER, path)
     if os.path.exists(file_path) and os.path.isfile(file_path):
         # Check if this is a thumbnail request
@@ -122,8 +132,72 @@ def serve_img(path):
                     print(f"Error creating thumbnail on-demand: {e}")
                     # If thumbnail creation fails, serve the original
                     return send_from_directory(UPLOAD_FOLDER, original_path)
-        
-        return send_from_directory(UPLOAD_FOLDER, path)
+        # search database enty
+        image_meta = next((img for img in db.get_database()['images'] if img['path'] == path or img['thumb_path'] == path), None)
+
+        if crop and image_meta.get("crop", None) is not None:
+
+            img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+            if image_meta.get("rotate", None) is not None:
+                img = img.rotate(-image_meta["rotate"])
+            screen_size = (1920, 1080)
+            img_size = img.size
+            crop_data = image_meta['crop']
+            img_pos = [0, 0]
+            t_size = [0, 0]
+            scale = 1
+            if img_size[0] / img_size[1] < 16/9:
+                scale = screen_size[1] / img_size[1]
+                tw = img_size[0] * scale
+                th = screen_size[1]
+                t_size = [tw, th]
+                img_pos[0] = int((screen_size[0] - tw) / 2)
+            else:
+                scale = screen_size[0] / img_size[0]
+                th = img_size[1] * scale
+                tw = screen_size[0]
+                t_size = [tw, th]
+                img_pos[1] = int((screen_size[1] - th) / 2)
+
+            c_x = crop_data.get("x")
+            c_y = crop_data.get("y")
+            c_w = crop_data.get("w")
+            c_h = int(c_w / 16 * 9)
+
+            x1 = max(img_pos[0], c_x) - img_pos[0]
+            y1 = max(img_pos[1], c_y) - img_pos[1]
+            x2 = min(img_pos[0] + t_size[0], c_x + c_w) - img_pos[0]
+            y2 = min(img_pos[1] + t_size[1], c_y + c_h) - img_pos[1]
+
+            x1 /= scale
+            y1 /= scale
+            y2 /= scale
+            x2 /= scale
+
+            img = img.crop((x1, y1, x2, y2))
+
+            if image_meta.get("mirror", None) is not None:
+                if image_meta["mirror"].get("h", False):
+                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                if image_meta["mirror"].get("v", False):
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+
+            img_io = BytesIO()
+            img.save(img_io, 'JPEG')  # Oder PNG, wenn Transparenz
+            img_io.seek(0)
+
+            response = send_file(
+                img_io,
+                mimetype='image/jpeg',
+                as_attachment=False
+            )
+        else:
+            # Create a response with cache control headers to prevent caching
+            response = send_from_directory(UPLOAD_FOLDER, path)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
     else:
         return f"File not found: {file_path}", 404
 
@@ -136,6 +210,23 @@ def static_files(path):
         return f"File not found: {file_path}", 404
 
 # API Endpoints
+@app.route('/api/current_state', methods=['GET'])
+def get_current_state():
+    global last_update_timestamp
+    database = db.get_database()
+    return jsonify({
+        'settings': database['settings'],
+        'images': database['images'],
+        'timestamp': last_update_timestamp
+    })
+
+@app.route('/api/updates', methods=['GET'])
+def check_updates():
+    global last_update_timestamp
+    return jsonify({
+        'timestamp': last_update_timestamp
+    })
+
 @app.route('/api/images', methods=['GET'])
 def get_images():
     return jsonify(db.get_database()['images'])
@@ -245,8 +336,8 @@ def upload_image():
             # Add to database
             db.appendImage(image_data)
             
-            # Notify clients about new image
-            socketio.emit('image_added', image_data)
+            # Update timestamp to notify clients about changes
+            # update_timestamp()
             
             uploaded_images.append(image_data)
     
@@ -257,7 +348,6 @@ def upload_image():
 
 @app.route('/api/images/<image_id>', methods=['DELETE'])
 def delete_image(image_id):
-
     image = db.removeImage(image_id)
 
     if image is not None:
@@ -274,19 +364,38 @@ def delete_image(image_id):
             except OSError:
                 pass  # Thumbnail might not exist
     
-    # Notify clients
-    socketio.emit('image_deleted', {'id': image_id})
+    # Update timestamp to notify clients about changes
+    update_timestamp()
     
     return jsonify({'success': True})
 
-@app.route('/api/images/<image_id>/rotate', methods=['POST'])
-def rotate_image(image_id):
+@app.route('/api/images/<image_id>/transform', methods=['POST'])
+def transform_image(image_id):
+    """Combined endpoint for updating multiple transformation properties at once"""
     try:
         data = request.get_json()
-        angle = data.get('angle', 90)  # Default to 90 degrees
-        db.rotateImage(image_id, angle, UPLOAD_FOLDER)
-        # Notify clients
-        socketio.emit('image_updated', {'id': image_id})
+        transform_data = {}
+        
+        # Extract transformation data from request
+        if 'rotate' in data:
+            transform_data['rotate'] = data['rotate']
+        if 'mirror' in data:
+            transform_data['mirror'] = data['mirror']
+        if 'crop' in data:
+            transform_data['crop'] = data['crop']
+
+        if not transform_data:
+            return jsonify({'error': 'No transformation data provided'}), 400
+
+        # Use the updateImageTransform method to update all provided transformation data
+        result = db.updateImageTransform(image_id, transform_data)
+        update_timestamp()
+        
+        # Check if there was an error
+        if isinstance(result, tuple) and len(result) > 1 and 'error' in result[0]:
+            return jsonify(result[0]), result[1]
+        
+        # Update timestamp to notify clients about changes
         
         return jsonify({'success': True})
     except Exception as e:
@@ -311,8 +420,8 @@ def rename_image(image_id):
         image['name'] = new_name
         db.save_database(db_data)
         
-        # Notify clients
-        socketio.emit('image_updated', {'id': image_id})
+        # Update timestamp to notify clients about changes
+        update_timestamp()
         
         return jsonify({'success': True, 'name': new_name})
     except Exception as e:
@@ -330,8 +439,8 @@ def update_settings():
     db.update_settings(config)
     database = db.get_database()
 
-    # Notify clients
-    socketio.emit('settings_updated', database['settings'])
+    # Update timestamp to notify clients about changes
+    update_timestamp()
     
     return jsonify(database['settings'])
 
@@ -344,8 +453,8 @@ def set_display_image():
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     
-    # Notify clients
-    socketio.emit('settings_updated', settings)
+    # Update timestamp to notify clients about changes
+    update_timestamp()
     
     return jsonify({'success': True})
 
@@ -357,29 +466,10 @@ def reset_display():
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     
-    # Notify clients
-    database = db.get_database()
-    socketio.emit('settings_updated', database['settings'])
+    # Update timestamp to notify clients about changes
+    update_timestamp()
     
     return jsonify({'success': True})
-
-# WebSocket events
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client disconnected')
-
-@socketio.on('request_current_state')
-def handle_current_state():
-    database = db.get_database()
-    emit('current_state', {
-        'settings': database['settings'],
-        'images': database['images']
-    })
-
 
 def main():
     global db
@@ -387,21 +477,21 @@ def main():
     print('initializing database')
     db = Database(DATABASE_FILE)
 
-
     # Register WiFi routes
     register_wifi_routes(app)
 
     print('looking if linux')
     # Start WiFi monitoring in background (only on Raspberry Pi)
-    if "Raspbian" in os.uname().version:
-        print('is linux!')
-        start_wifi_monitor()
+    if hasattr(os, 'uname'):
+        if "Raspbian" in os.uname().version:
+            print('is linux!')
+            start_wifi_monitor()
+        else:
+            print('not Raspberry Pi!')
     else:
         print('not linux!')
     
     # Start the server
-
-
     lan_ip = get_lan_ip()
     print('running server on port 5000')
     print(f'Local admin URL: http://127.0.0.1:5000/admin')
@@ -409,7 +499,7 @@ def main():
     print(f'Network admin URL: http://{lan_ip}:5000/admin')
     print(f'Network view URL: http://{lan_ip}:5000/view')
     print('server listening...')
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
 if __name__ == "__main__":
     main()

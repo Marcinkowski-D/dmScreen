@@ -90,10 +90,17 @@ textarea {
     position: relative;
 }
 
-.gallery-image {
+.thumb-container{
+    display: flex;
     width: 100%;
     height: 150px;
-    object-fit: cover;
+    /*object-fit: fill;*/
+}
+
+.gallery-image {
+    margin: auto;
+    max-width: 100%;
+    max-height: 100%;
 }
 
 .gallery-controls {
@@ -260,6 +267,270 @@ textarea {
     vertical-align: middle;
 }
 
+/* Spinner Animation */
+.spinner_black {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 3px solid rgba(61, 61, 61, 0.3);
+    border-radius: 50%;
+    border-top-color: #000000;
+    animation: spin 1s ease-in-out infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+button.active{
+    background-color: #4CAF50;
+    color: white;
+}
+
+/* Backdrop Loading Screen */
+.backdrop {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 2000;
+    justify-content: center;
+    align-items: center;
+}
+
+.backdrop.active {
+    display: flex;
+}
+
+.backdrop-content {
+    background-color: white;
+    padding: 30px;
+    border-radius: 8px;
+    text-align: center;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.backdrop-content .spinner {
+    width: 40px;
+    height: 40px;
+    border-width: 4px;
+    margin: 0 auto 15px;
+}
+
+.backdrop-content p {
+    margin: 0;
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+}
+
+/* Modal Dialog Styles */
+.modal-dialog {
+    min-width: 300px;
+    max-width: 500px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    padding: 15px;
+    border-bottom: 1px solid #ddd;
+    background-color: #f8f8f8;
+    border-radius: 8px 8px 0 0;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+}
+
+.modal-body {
+    padding: 20px;
+    flex-grow: 1;
+}
+
+.user-select-none{
+    user-select: none;
+}
+
+.modal-body p {
+    font-weight: normal;
+    margin-bottom: 0;
+}
+
+.modal-footer {
+    padding: 15px;
+    border-top: 1px solid #ddd;
+    background-color: #f8f8f8;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-radius: 0 0 8px 8px;
+}
+
+/* Crop Modal Styles */
+.crop-dialog {
+    max-width: 800px;
+    width: 90%;
+}
+
+.crop-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+#crop-preview-container {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    background-color: #000;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#crop-preview-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.crop-selection {
+    position: absolute;
+    border: 2px dashed #fff;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+    cursor: move;
+    /* Default 16:9 aspect ratio */
+    width: 320px;
+    height: 180px;
+    box-sizing: border-box;
+}
+
+/* Resize handles */
+.resize-handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background-color: #fff;
+    border: 1px solid #333;
+    border-radius: 50%;
+}
+
+.resize-handle.top-left {
+    top: -6px;
+    left: -6px;
+    cursor: nwse-resize;
+}
+
+.resize-handle.top-right {
+    top: -6px;
+    right: -6px;
+    cursor: nesw-resize;
+}
+
+.resize-handle.bottom-left {
+    bottom: -6px;
+    left: -6px;
+    cursor: nesw-resize;
+}
+
+.resize-handle.bottom-right {
+    bottom: -6px;
+    right: -6px;
+    cursor: nwse-resize;
+}
+
+.crop-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.mirror-controls, .rotation-controls, .crop-options {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.mirror-controls label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+}
+
+.rotation-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}
+
+/* Styles for images with transformations */
+.image-rotate-90 {
+    transform: rotate(90deg);
+}
+
+.image-rotate-180 {
+    transform: rotate(180deg);
+}
+
+.image-rotate-270 {
+    transform: rotate(-90deg);
+}
+
+.image-mirror-h {
+    transform: scaleX(-1);
+}
+
+.image-mirror-v {
+    transform: scaleY(-1);
+}
+
+/* Combined transformations */
+.image-rotate-90.image-mirror-h {
+    transform: rotate(90deg) scaleX(-1);
+}
+
+.image-rotate-90.image-mirror-v {
+    transform: rotate(90deg) scaleY(-1);
+}
+
+.image-rotate-180.image-mirror-h {
+    transform: rotate(180deg) scaleX(-1);
+}
+
+.image-rotate-180.image-mirror-v {
+    transform: rotate(180deg) scaleY(-1);
+}
+
+.image-rotate-270.image-mirror-h {
+    transform: rotate(-90deg) scaleX(-1);
+}
+
+.image-rotate-270.image-mirror-v {
+    transform: rotate(-90deg) scaleY(-1);
+}
+
+.image-mirror-h.image-mirror-v {
+    transform: scale(-1, -1);
+}
+
+.image-rotate-90.image-mirror-h.image-mirror-v {
+    transform: rotate(90deg) scale(-1, -1);
+}
+
+.image-rotate-180.image-mirror-h.image-mirror-v {
+    transform: rotate(180deg) scale(-1, -1);
+}
+
+.image-rotate-270.image-mirror-h.image-mirror-v {
+    transform: rotate(-90deg) scale(-1, -1);
 }

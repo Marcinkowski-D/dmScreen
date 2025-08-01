@@ -1,8 +1,6 @@
-// Connect to WebSocket server
-const socket = io();
-
 // DOM Elements
 const displayImage = document.getElementById('display-image');
+const imageContainer = document.getElementById('image-container');
 
 // Add CSS for fade transitions
 const style = document.createElement('style');
@@ -36,44 +34,106 @@ let settings = {
 let images = [];
 let screensaverTimeout = null;
 let isTransitioning = false;
+let lastUpdateTimestamp = 0;
+const POLLING_INTERVAL = 2000; // Poll every 2 seconds
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     // Request current state from server
-    socket.emit('request_current_state');
-});
-
-// Socket events
-socket.on('current_state', (data) => {
-    settings = data.settings;
-    images = data.images;
-    updateDisplay();
-});
-
-socket.on('settings_updated', (newSettings) => {
-    settings = newSettings;
-    updateDisplay();
-});
-
-socket.on('image_added', (image) => {
-    images.push(image);
-});
-
-socket.on('image_deleted', (data) => {
-    images = images.filter(img => img.id !== data.id);
+    fetchCurrentState();
     
-    // If the deleted image was being displayed, update the display
-    if (settings.current_image === data.id || settings.screensaver === data.id) {
-        updateDisplay();
-    }
+    // Start polling for updates
+    startPolling();
 });
 
-socket.on('image_updated', (data) => {
-    // Refresh the image if it's currently displayed
-    if (settings.current_image === data.id) {
-        updateDisplay(true);
+// Polling functions
+function startPolling() {
+    // Initial fetch
+    fetchUpdates();
+    
+    // Set up interval for polling
+    setInterval(fetchUpdates, POLLING_INTERVAL);
+}
+
+async function fetchUpdates() {
+    try {
+        const response = await fetch('/api/updates');
+        const data = await response.json();
+        
+        // If there's a new update, fetch the current state
+        if (data.timestamp > lastUpdateTimestamp) {
+            lastUpdateTimestamp = data.timestamp;
+            fetchCurrentState();
+        }
+    } catch (error) {
+        console.error('Error checking for updates:', error);
     }
-});
+}
+
+async function fetchCurrentState() {
+    try {
+        const response = await fetch('/api/current_state?t=' + Date.now());
+        const data = await response.json();
+
+        // Update last timestamp
+        lastUpdateTimestamp = data.timestamp;
+        
+        // Check if images have changed
+        const oldImages = images;
+        const oldSettings = settings;
+        
+        // Update data
+        settings = data.settings;
+        images = data.images;
+        
+        // Handle image deletion
+        if (oldImages.length > 0 && oldSettings.current_image) {
+            const oldImage = oldImages.find(img => img.id === oldSettings.current_image);
+            const newImage = images.find(img => img.id === oldSettings.current_image);
+            
+            if (oldImage && !newImage) {
+                // Image was deleted, update display
+                updateDisplay();
+                return;
+            }
+        }
+        
+        // Handle settings changes
+        if (oldSettings.current_image !== settings.current_image || 
+            oldSettings.screensaver !== settings.screensaver) {
+            updateDisplay();
+            return;
+        }
+        
+        // Handle image updates
+        if (settings.current_image) {
+            const oldImage = oldImages.find(img => img.id === settings.current_image);
+            const newImage = images.find(img => img.id === settings.current_image);
+            
+            if (oldImage && newImage) {
+                // Check if path or name changed
+                if (oldImage.path !== newImage.path || oldImage.name !== newImage.name) {
+                    updateDisplay(true);
+                    return;
+                }
+                
+                // If timestamp changed significantly and we're displaying this image,
+                // force a refresh to handle rotated images
+                if (settings.current_image) {
+                    updateDisplay(true);
+                    return;
+                }
+            }
+        }
+        
+        // If this is the first load, update display
+        if (oldImages.length === 0) {
+            updateDisplay();
+        }
+    } catch (error) {
+        console.error('Error fetching current state:', error);
+    }
+}
 
 // Functions
 function updateDisplay(forceRefresh = false) {
@@ -112,18 +172,28 @@ function updateDisplay(forceRefresh = false) {
         displayImage.classList.remove('fade-out');
     }
     
+    // Function to apply transformations based on image metadata
+    const applyTransformations = (image) => {
+        // Reset all transformation classes
+        displayImage.className = 'fullscreen-image';
+        if (isSwitchingToFullImage) {
+            displayImage.classList.add('fade-in');
+        }
+    };
+    
     // Function to load the image
     const loadImage = () => {
         if (imageToShow) {
             // If image was hidden, show it first
             displayImage.classList.remove('hidden');
+            imageContainer.style.display = 'flex';
             
-            // Add timestamp to prevent caching if force refresh
-            const timestamp = forceRefresh ? `?t=${Date.now()}` : '';
+            // Always add timestamp to prevent caching, use a stronger timestamp for force refresh
+            const timestamp = forceRefresh ? `?t=${Date.now()}&force=1` : `?t=${Date.now()}`;
             
             if (!isSwitchingToFullImage) {
                 // First load the thumbnail
-                const thumbnailPath = `/img/thumb_${imageToShow.path}${timestamp}`;
+                const thumbnailPath = `/img/crop_thumb_${imageToShow.path}${timestamp}`;
                 displayImage.alt = imageToShow.name;
                 
                 // Set the src to load the thumbnail
@@ -131,6 +201,9 @@ function updateDisplay(forceRefresh = false) {
                 
                 // When the thumbnail loads, fade it in and then load the full image
                 displayImage.onload = () => {
+                    // Apply transformations
+                    applyTransformations(imageToShow);
+                    
                     displayImage.classList.remove('fade-out');
                     displayImage.classList.add('fade-in');
                     
@@ -157,7 +230,7 @@ function updateDisplay(forceRefresh = false) {
                 };
             } else {
                 // Now load the full-size image
-                const imagePath = `/img/${imageToShow.path}${timestamp}`;
+                const imagePath = `/img/crop_${imageToShow.path}${timestamp}`;
                 displayImage.alt = imageToShow.name;
                 
                 // Set the src to load the full image
@@ -165,6 +238,9 @@ function updateDisplay(forceRefresh = false) {
                 
                 // When the full image loads, complete the transition
                 displayImage.onload = () => {
+                    // Apply transformations
+                    applyTransformations(imageToShow);
+                    
                     displayImage.classList.remove('fade-out');
                     displayImage.classList.add('fade-in');
                     isTransitioning = false;
@@ -186,6 +262,7 @@ function updateDisplay(forceRefresh = false) {
         } else {
             // No image to display - hide the element completely
             displayImage.classList.add('hidden');
+            imageContainer.style.display = 'none';
             displayImage.src = '';
             displayImage.alt = 'No image selected';
             isTransitioning = false;
@@ -194,7 +271,7 @@ function updateDisplay(forceRefresh = false) {
         }
     };
     
-    if (isSwitchingToFullImage) {
+    if (isSwitchingToFullImage || forceRefresh) {
         // If we're just switching from thumbnail to full image, do it immediately
         loadImage();
     } else {

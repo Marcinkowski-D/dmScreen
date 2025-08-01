@@ -7,6 +7,100 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+    <div id="backdrop" class="backdrop">
+        <div class="backdrop-content">
+            <div class="spinner_black"></div>
+            <p id="backdrop-text"></p>
+        </div>
+    </div>
+    
+    <!-- Alert Modal Dialog -->
+    <div id="alert-modal" class="backdrop">
+        <div class="backdrop-content modal-dialog">
+            <div class="modal-header">
+                <h3 id="alert-title">Information</h3>
+            </div>
+            <div class="modal-body">
+                <p id="alert-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="alert-ok-btn" class="btn">OK</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Confirm Modal Dialog -->
+    <div id="confirm-modal" class="backdrop">
+        <div class="backdrop-content modal-dialog">
+            <div class="modal-header">
+                <h3 id="confirm-title">Confirmation</h3>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="confirm-cancel-btn" class="btn">Cancel</button>
+                <button id="confirm-ok-btn" class="btn">OK</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Crop Modal Dialog -->
+    <div id="crop-modal" class="backdrop">
+        <div class="backdrop-content modal-dialog crop-dialog">
+            <div class="modal-header">
+                <h3>Crop and Transform Image</h3>
+            </div>
+            <div class="modal-body user-select-none">
+                <div class="crop-container">
+                    <div id="crop-preview-container">
+                        <img id="crop-preview-image" src="" alt="Image to crop">
+                        <div id="crop-selection" class="crop-selection">
+                            <div class="resize-handle top-left"></div>
+                            <div class="resize-handle top-right"></div>
+                            <div class="resize-handle bottom-left"></div>
+                            <div class="resize-handle bottom-right"></div>
+                        </div>
+                    </div>
+                    <div class="crop-controls">
+                        <div class="form-group">
+                            <label>Mirror Options:</label>
+                            <div class="mirror-controls">
+                                <label>
+                                    <input type="checkbox" id="mirror-h"> Horizontal
+                                </label>
+                                <label>
+                                    <input type="checkbox" id="mirror-v"> Vertical
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Rotation:</label>
+                            <div class="rotation-controls">
+                                <button id="rotate-0" class="btn">0°</button>
+                                <button id="rotate-90" class="btn">90°</button>
+                                <button id="rotate-180" class="btn">180°</button>
+                                <button id="rotate-270" class="btn">270°</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Crop Options:</label>
+                            <div class="crop-options">
+                                <button id="crop-fill-btn" class="btn">Fill Screen</button>
+                                <button id="set-center-btn" class="btn">Center</button>
+                                <button id="reset-crop-btn" class="btn">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="crop-cancel-btn" class="btn">Cancel</button>
+                <button id="crop-apply-btn" class="btn">Apply</button>
+            </div>
+        </div>
+    </div>
+    
     <button id="reset-display" class="btn floating-btn">Reset Display to Screensaver</button>
     <div class="container">
         <h1>DM Screen Admin</h1>
@@ -83,7 +177,6 @@
         </div>
     </div>
     
-    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
     <script src="js/admin.js"></script>
 </body>
 </html>
