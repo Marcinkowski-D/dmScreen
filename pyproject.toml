@@ -5,7 +5,6 @@ description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
     "flask>=2.0.0",
-    "flask-socketio>=5.0.0",
     "pillow>=9.0.0",
     "werkzeug>=2.0.0",
     "python-engineio>=4.0.0",
