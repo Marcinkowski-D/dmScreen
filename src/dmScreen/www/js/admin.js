@@ -656,7 +656,6 @@ async function moveImage(imageId, folderId) {
         }
 
         hideBackdrop();
-        showAlert('Image moved successfully');
 
         // Refresh the gallery
         fetchCurrentState();
