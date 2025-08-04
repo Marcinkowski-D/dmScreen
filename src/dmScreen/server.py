@@ -89,12 +89,20 @@ def view():
 
 @app.route('/img/<path:path>')
 def serve_img(path):
+    # Get query parameters
+    w = request.args.get("w", None)
+    if w is not None:
+        w = int(w)
+
     crop = False
     if path.startswith('crop_'):
         crop = True
         path = path[5:]
     is_thumb = path.startswith('thumb_')
     file_path = os.path.join(UPLOAD_FOLDER, path)
+    
+    
+    
     if os.path.exists(file_path) and os.path.isfile(file_path):
         # Check if this is a thumbnail request
         if is_thumb:
@@ -199,10 +207,11 @@ def serve_img(path):
             # Create a response with cache control headers to prevent caching
             img = Image.open(os.path.join(UPLOAD_FOLDER, path))
 
+        w = w if w is not None else 1920
 
-        if img.size[0] > 1920:
-            h = int(1920 / (img.size[0]/img.size[1]))
-            img = img.resize((1920, h))
+        if img.size[0] > w:
+            h = int(w / (img.size[0]/img.size[1]))
+            img = img.resize((w, h))
         if img.size[1] > 1080:
             w = int(1080 * (img.size[0]/img.size[1]))
             img = img.resize((w, 1080))

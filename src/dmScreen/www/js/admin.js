@@ -2,7 +2,6 @@
 const uploadForm = document.getElementById('upload-form');
 const gallery = document.getElementById('gallery');
 const screensaverSelect = document.getElementById('screensaver');
-const saveSettingsBtn = document.getElementById('save-settings');
 const removeScreensaverBtn = document.getElementById('remove-screensaver');
 const wifiStatus = document.getElementById('wifi-status');
 const wifiForm = document.getElementById('wifi-form');
@@ -120,9 +119,24 @@ async function showConfirm(message, title = 'Confirmation') {
             confirmCancelBtn.removeEventListener('click', cancelHandler);
             reject();
         };
-
         confirmOkBtn.addEventListener('click', okHandler);
         confirmCancelBtn.addEventListener('click', cancelHandler);
+
+        // Add event listeners for Enter key
+        const handleKeypress = (e) => {
+            if (e.key === 'Enter') {
+                if (document.activeElement === confirmOkBtn) {
+                    okHandler();
+                } else if (document.activeElement === confirmCancelBtn) {
+                    cancelHandler();
+                }
+            }
+        };
+
+        confirmOkBtn.addEventListener('keypress', handleKeypress);
+        confirmCancelBtn.addEventListener('keypress', handleKeypress);
+
+        confirmOkBtn.focus();
 
         // Show the modal
         confirmModal.classList.add('active');
@@ -136,6 +150,8 @@ const POLLING_INTERVAL = 2000; // Poll every 2 seconds
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+
+    currentFolderId = localStorage.getItem('currentFolder');
     // Request current state from server
     fetchCurrentState();
 
@@ -150,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Add event listener for file selection
     imageFilesInput.addEventListener('change', handleFileSelection);
-    
+
     // Add event listeners for folder management
     newFolderBtn.addEventListener('click', showCreateFolderDialog);
     folderSelect.addEventListener('change', updateUploadFolder);
@@ -188,6 +204,25 @@ async function fetchCurrentState() {
         // Update last timestamp
         lastUpdateTimestamp = data.timestamp;
 
+        // Store all folders for reference
+        if (data.folders) {
+            allFolders = data.folders;
+            
+            // Initialize folderPath if currentFolderId is set from localStorage
+            if (currentFolderId && folderPath.length === 0) {
+                // Build path from root to current folder
+                const path = [];
+                let currentFolder = allFolders.find(f => f.id === currentFolderId);
+
+                while (currentFolder) {
+                    path.unshift(currentFolder);
+                    currentFolder = allFolders.find(f => f.id === currentFolder.parent);
+                }
+
+                folderPath = path;
+            }
+        }
+
         // Update UI
         updateGallery(data.images, data.folders);
         updateSettings(data.settings);
@@ -199,7 +234,7 @@ async function fetchCurrentState() {
 // Folder navigation function
 async function navigateToFolder(folderId) {
     currentFolderId = folderId;
-    
+
     // Update folder path
     if (folderId === null) {
         // Root folder
@@ -208,15 +243,20 @@ async function navigateToFolder(folderId) {
         // Build path from root to current folder
         const path = [];
         let currentFolder = allFolders.find(f => f.id === folderId);
-        
+
         while (currentFolder) {
             path.unshift(currentFolder);
             currentFolder = allFolders.find(f => f.id === currentFolder.parent);
         }
-        
+
         folderPath = path;
     }
-    
+    if (folderId === null) {
+        localStorage.removeItem('currentFolder');
+    } else {
+        localStorage.setItem('currentFolder', currentFolderId);
+    }
+
     // Fetch current state to update the gallery
     await fetchCurrentState();
 }
@@ -225,7 +265,7 @@ async function navigateToFolder(folderId) {
 function updateFolderPath() {
     const folderPathElement = document.getElementById('folder-path');
     folderPathElement.innerHTML = '';
-    
+
     // Add root item
     const rootItem = document.createElement('span');
     rootItem.className = 'folder-path-item';
@@ -233,7 +273,7 @@ function updateFolderPath() {
     rootItem.textContent = '/';
     rootItem.addEventListener('click', () => navigateToFolder(null));
     folderPathElement.appendChild(rootItem);
-    
+
     // Add path items
     folderPath.forEach((folder, index) => {
         // Add separator
@@ -241,13 +281,13 @@ function updateFolderPath() {
         separator.className = 'folder-path-separator';
         separator.textContent = ' > ';
         folderPathElement.appendChild(separator);
-        
+
         // Add folder item
         const folderItem = document.createElement('span');
         folderItem.className = 'folder-path-item';
         folderItem.dataset.folderId = folder.id;
         folderItem.textContent = folder.name;
-        
+
         // Only add click event for parent folders, not the current folder
         const isCurrentFolder = index === folderPath.length - 1;
         if (!isCurrentFolder) {
@@ -257,7 +297,7 @@ function updateFolderPath() {
             // Current folder is displayed as plain text
             folderItem.className = 'folder-path-item current-folder';
         }
-        
+
         folderPathElement.appendChild(folderItem);
     });
 }
@@ -266,39 +306,39 @@ function updateFolderPath() {
 function updateFolderSelect() {
     const folderSelect = document.getElementById('folder-select');
     folderSelect.innerHTML = '';
-    
+
     // Add root option
     const rootOption = document.createElement('option');
     rootOption.value = '';
     rootOption.textContent = '/';
     folderSelect.appendChild(rootOption);
-    
+
     // Build folder options with complete paths
     function addFolderOptions(parentId, level = 0) {
         const folders = allFolders
             .filter(f => f.parent === parentId)
             .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-        
+
         folders.forEach(folder => {
             const option = document.createElement('option');
             option.value = folder.id;
-            
+
             // Use the full path for the folder
             const fullPath = getFolderPath(folder.id);
             option.textContent = fullPath;
-            
+
             // Select current folder if we're in one
             if (folder.id === currentFolderId) {
                 option.selected = true;
             }
-            
+
             folderSelect.appendChild(option);
-            
+
             // Add child folders recursively
             addFolderOptions(folder.id, level + 1);
         });
     }
-    
+
     addFolderOptions(null);
 }
 
@@ -307,7 +347,7 @@ function updateUploadFolder() {
     // This function is called when the folder selection dropdown changes
     // The selected folder will be sent with the upload form
     console.log('Upload folder changed to:', folderSelect.value);
-    
+
     // If we're in a folder, set the folder select to that folder by default
     if (currentFolderId && !folderSelect.value) {
         folderSelect.value = currentFolderId;
@@ -317,7 +357,7 @@ function updateUploadFolder() {
 // Show dialog to create a new folder
 async function showCreateFolderDialog() {
     const folderName = await showPrompt('Enter folder name:', 'New Folder');
-    
+
     if (folderName && folderName.trim()) {
         createFolder(folderName.trim());
     }
@@ -327,7 +367,7 @@ async function showCreateFolderDialog() {
 async function createFolder(name) {
     try {
         showBackdrop('Creating folder...');
-        
+
         const response = await fetch('/api/folders', {
             method: 'POST',
             headers: {
@@ -338,14 +378,13 @@ async function createFolder(name) {
                 parent: currentFolderId
             })
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to create folder');
         }
-        
+
         hideBackdrop();
-        showAlert('Folder created successfully');
-        
+
         // Refresh the gallery
         fetchCurrentState();
     } catch (error) {
@@ -358,20 +397,20 @@ async function createFolder(name) {
 function showRenameFolderInput(folderId) {
     const folderElement = document.querySelector(`#folder-${folderId} .folder-name`);
     const currentName = folderElement.textContent;
-    
+
     // Create input element
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'rename-input';
     input.value = currentName;
-    
+
     // Replace folder name with input
     folderElement.innerHTML = '';
     folderElement.appendChild(input);
-    
+
     // Focus the input
     input.focus();
-    
+
     // Add event listeners for saving on enter or blur
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -380,7 +419,7 @@ function showRenameFolderInput(folderId) {
             folderElement.textContent = currentName;
         }
     });
-    
+
     input.addEventListener('blur', () => {
         renameFolder(folderId, input.value);
     });
@@ -394,7 +433,7 @@ async function renameFolder(folderId, newName) {
         folderElement.textContent = folderElement.dataset.originalName || 'Unnamed Folder';
         return;
     }
-    
+
     try {
         const response = await fetch(`/api/folders/${folderId}/rename`, {
             method: 'POST',
@@ -403,20 +442,20 @@ async function renameFolder(folderId, newName) {
             },
             body: JSON.stringify({name: newName})
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to rename folder');
         }
-        
+
         // Update the folder name in the UI
         const folderElement = document.querySelector(`#folder-${folderId} .folder-name`);
         folderElement.textContent = newName;
-        
+
         // Refresh the gallery to update all references
         fetchCurrentState();
     } catch (error) {
         showAlert(`Error: ${error.message}`, 'Error');
-        
+
         // Restore original name
         const folderElement = document.querySelector(`#folder-${folderId} .folder-name`);
         folderElement.textContent = folderElement.dataset.originalName || 'Unnamed Folder';
@@ -426,14 +465,14 @@ async function renameFolder(folderId, newName) {
 // Delete a folder
 async function deleteFolder(folderId) {
     const confirmed = await showConfirm('Are you sure you want to delete this folder? All contents will be moved to the parent folder.');
-    
+
     if (!confirmed) {
         return;
     }
-    
+
     try {
         showBackdrop('Deleting folder...');
-        
+
         const response = await fetch(`/api/folders/${folderId}`, {
             method: 'DELETE'
         });
@@ -443,7 +482,7 @@ async function deleteFolder(folderId) {
             throw new Error('Failed to delete folder');
         }
 
-        
+
         // Refresh the gallery
         fetchCurrentState();
     } catch (error) {
@@ -456,12 +495,12 @@ async function deleteFolder(folderId) {
 async function showMoveFolderDialog(folderId) {
     // Create a modal dialog with folder selection
     const folderToMove = allFolders.find(f => f.id === folderId);
-    
+
     if (!folderToMove) {
         showAlert('Folder not found', 'Error');
         return;
     }
-    
+
     const modalContent = document.createElement('div');
     modalContent.innerHTML = `
         <h3>Move Folder: ${folderToMove.name}</h3>
@@ -470,35 +509,35 @@ async function showMoveFolderDialog(folderId) {
             <option value="">/</option>
         </select>
     `;
-    
+
     // Add folder options
     const selectElement = modalContent.querySelector('#move-destination-folder');
-    
+
     function addFolderOptions(parentId, level = 0, excludeFolderId) {
         const folders = allFolders
             .filter(f => f.parent === parentId && f.id !== excludeFolderId)
             .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-        
+
         folders.forEach(folder => {
             // Skip the folder being moved and its children
             if (folder.id === excludeFolderId || isChildFolder(folder.id, excludeFolderId)) {
                 return;
             }
-            
+
             const option = document.createElement('option');
             option.value = folder.id;
-            
+
             // Use the full path for the folder
             const fullPath = getFolderPath(folder.id);
             option.textContent = fullPath;
-            
+
             selectElement.appendChild(option);
-            
+
             // Add child folders recursively
             addFolderOptions(folder.id, level + 1, excludeFolderId);
         });
     }
-    
+
     // Check if a folder is a child of another folder
     function isChildFolder(folderId, parentId) {
         const folder = allFolders.find(f => f.id === folderId);
@@ -507,12 +546,12 @@ async function showMoveFolderDialog(folderId) {
         if (folder.parent === null) return false;
         return isChildFolder(folder.parent, parentId);
     }
-    
+
     addFolderOptions(null, 0, folderId);
-    
+
     // Show the modal
     const result = await showCustomModal(modalContent, 'Move Folder');
-    
+
     if (result) {
         const destinationFolderId = selectElement.value || null;
         moveFolder(folderId, destinationFolderId);
@@ -523,7 +562,7 @@ async function showMoveFolderDialog(folderId) {
 async function moveFolder(folderId, destinationFolderId) {
     try {
         showBackdrop('Moving folder...');
-        
+
         const response = await fetch(`/api/folders/${folderId}/move`, {
             method: 'POST',
             headers: {
@@ -531,14 +570,13 @@ async function moveFolder(folderId, destinationFolderId) {
             },
             body: JSON.stringify({parent: destinationFolderId})
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to move folder');
         }
-        
+
         hideBackdrop();
-        showAlert('Folder moved successfully');
-        
+
         // Refresh the gallery
         fetchCurrentState();
     } catch (error) {
@@ -551,12 +589,12 @@ async function moveFolder(folderId, destinationFolderId) {
 async function showMoveImageDialog(imageId) {
     // Create a modal dialog with folder selection
     const imageToMove = allImages.find(img => img.id === imageId);
-    
+
     if (!imageToMove) {
         showAlert('Image not found', 'Error');
         return;
     }
-    
+
     const modalContent = document.createElement('div');
     modalContent.innerHTML = `
         <h3>Move Image: ${imageToMove.name}</h3>
@@ -565,35 +603,35 @@ async function showMoveImageDialog(imageId) {
             <option value="">/</option>
         </select>
     `;
-    
+
     // Add folder options
     const selectElement = modalContent.querySelector('#move-destination-folder');
-    
+
     function addFolderOptions(parentId, level = 0) {
         const folders = allFolders
             .filter(f => f.parent === parentId)
             .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-        
+
         folders.forEach(folder => {
             const option = document.createElement('option');
             option.value = folder.id;
-            
+
             // Use the full path for the folder
             const fullPath = getFolderPath(folder.id);
             option.textContent = fullPath;
-            
+
             selectElement.appendChild(option);
-            
+
             // Add child folders recursively
             addFolderOptions(folder.id, level + 1);
         });
     }
-    
+
     addFolderOptions(null);
-    
+
     // Show the modal
     const result = await showCustomModal(modalContent, 'Move Image');
-    
+
     if (result) {
         const destinationFolderId = selectElement.value || null;
         moveImage(imageId, destinationFolderId);
@@ -604,7 +642,7 @@ async function showMoveImageDialog(imageId) {
 async function moveImage(imageId, folderId) {
     try {
         showBackdrop('Moving image...');
-        
+
         const response = await fetch(`/api/images/${imageId}/move`, {
             method: 'POST',
             headers: {
@@ -612,14 +650,14 @@ async function moveImage(imageId, folderId) {
             },
             body: JSON.stringify({folder: folderId})
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to move image');
         }
-        
+
         hideBackdrop();
         showAlert('Image moved successfully');
-        
+
         // Refresh the gallery
         fetchCurrentState();
     } catch (error) {
@@ -631,16 +669,16 @@ async function moveImage(imageId, folderId) {
 // Helper function to get the full path of a folder
 function getFolderPath(folderId) {
     if (!folderId) return '/';
-    
+
     const path = [];
     let currentFolder = allFolders.find(f => f.id === folderId);
-    
+
     // Build path from current folder up to root
     while (currentFolder) {
         path.unshift(currentFolder.name);
         currentFolder = allFolders.find(f => f.id === currentFolder.parent);
     }
-    
+
     return '/' + path.join('/');
 }
 
@@ -649,7 +687,7 @@ async function showCustomModal(content, title = 'Dialog') {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
         modal.className = 'backdrop active';
-        
+
         modal.innerHTML = `
             <div class="backdrop-content modal-dialog">
                 <div class="modal-header">
@@ -663,7 +701,7 @@ async function showCustomModal(content, title = 'Dialog') {
                 </div>
             </div>
         `;
-        
+
         // Add content to the modal body
         const modalBody = modal.querySelector('#custom-modal-body');
         if (typeof content === 'string') {
@@ -671,21 +709,21 @@ async function showCustomModal(content, title = 'Dialog') {
         } else {
             modalBody.appendChild(content);
         }
-        
+
         // Add event listeners
         const cancelBtn = modal.querySelector('#custom-modal-cancel');
         const okBtn = modal.querySelector('#custom-modal-ok');
-        
+
         cancelBtn.addEventListener('click', () => {
             document.body.removeChild(modal);
             resolve(false);
         });
-        
+
         okBtn.addEventListener('click', () => {
             document.body.removeChild(modal);
             resolve(true);
         });
-        
+
         // Add to the document
         document.body.appendChild(modal);
     });
@@ -696,7 +734,7 @@ async function showPrompt(message, defaultValue = '') {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
         modal.className = 'backdrop active';
-        
+
         modal.innerHTML = `
             <div class="backdrop-content modal-dialog">
                 <div class="modal-header">
@@ -712,12 +750,12 @@ async function showPrompt(message, defaultValue = '') {
                 </div>
             </div>
         `;
-        
+
         // Add event listeners
         const input = modal.querySelector('#prompt-input');
         const cancelBtn = modal.querySelector('#prompt-cancel');
         const okBtn = modal.querySelector('#prompt-ok');
-        
+
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 document.body.removeChild(modal);
@@ -727,17 +765,17 @@ async function showPrompt(message, defaultValue = '') {
                 resolve(null);
             }
         });
-        
+
         cancelBtn.addEventListener('click', () => {
             document.body.removeChild(modal);
             resolve(null);
         });
-        
+
         okBtn.addEventListener('click', () => {
             document.body.removeChild(modal);
             resolve(input.value);
         });
-        
+
         // Add to the document and focus the input
         document.body.appendChild(modal);
         input.focus();
@@ -821,12 +859,12 @@ function convertImageToWebP(file, quality = 0.8) {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         const img = new Image();
-        
-        img.onload = function() {
+
+        img.onload = function () {
             canvas.width = img.width;
             canvas.height = img.height;
             ctx.drawImage(img, 0, 0);
-            
+
             // Konvertierung zu WebP
             canvas.toBlob((blob) => {
                 if (blob) {
@@ -841,7 +879,7 @@ function convertImageToWebP(file, quality = 0.8) {
                 }
             }, 'image/webp', quality);
         };
-        
+
         img.onerror = () => reject(new Error('Fehler beim Laden des Bildes'));
         img.src = URL.createObjectURL(file);
     });
@@ -862,14 +900,14 @@ function checkWebPSupport() {
 async function convertImagesToWebP(files, quality = 0.8, onProgress = null) {
     const supportedFormats = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
     const convertedFiles = [];
-    
+
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        
+
         if (onProgress) {
             onProgress(i + 1, files.length, file.name);
         }
-        
+
         try {
             if (supportedFormats.includes(file.type) && file.type !== 'image/webp') {
                 console.log(`Konvertiere ${file.name} zu WebP...`);
@@ -889,7 +927,7 @@ async function convertImagesToWebP(files, quality = 0.8, onProgress = null) {
             convertedFiles.push(file);
         }
     }
-    
+
     return convertedFiles;
 }
 
@@ -919,7 +957,7 @@ uploadForm.addEventListener('submit', async (e) => {
 
     try {
         const files = Array.from(imageFilesInput.files);
-        
+
         // Konvertiere Bilder zu WebP (falls unterstützt)
         let convertedFiles = files;
         if (supportsWebP) {
@@ -984,12 +1022,12 @@ uploadForm.addEventListener('submit', async (e) => {
 function calculateSavedBytes(originalFiles, convertedFiles) {
     let originalSize = 0;
     let convertedSize = 0;
-    
+
     for (let i = 0; i < originalFiles.length; i++) {
         originalSize += originalFiles[i].size;
         convertedSize += convertedFiles[i].size;
     }
-    
+
     return Math.max(0, originalSize - convertedSize);
 }
 
@@ -1123,20 +1161,20 @@ function handleFileSelection(e) {
 removeScreensaverBtn.addEventListener('click', async () => {
     // Clear the screensaver selection
     screensaverSelect.value = '';
-    
+
     // Update the UI
     const screensaverImg = document.getElementById('screensaver-preview-img');
     const screensaverText = document.getElementById('screensaver-preview-text');
-    
+
     screensaverText.textContent = 'No screensaver selected';
     screensaverText.style.display = 'block';
     screensaverImg.style.display = 'none';
-    
+
     // Save the settings
     const settings = {
         screensaver: null
     };
-    
+
     try {
         showBackdrop('Removing screensaver...');
         const response = await fetch('/api/settings', {
@@ -1152,13 +1190,11 @@ removeScreensaverBtn.addEventListener('click', async () => {
             throw new Error('Failed to remove screensaver');
         }
 
-        showAlert('Screensaver removed successfully', 'Success');
-        
         // Remove screensaver indicator from all gallery images
         document.querySelectorAll('.gallery-item .thumb-container').forEach(container => {
             container.classList.remove('screensaver-image');
         });
-        
+
         updatePreview(settings);
 
     } catch (error) {
@@ -1166,34 +1202,6 @@ removeScreensaverBtn.addEventListener('click', async () => {
     }
 });
 
-// Save settings button
-saveSettingsBtn.addEventListener('click', async () => {
-    const settings = {
-        screensaver: screensaverSelect.value || null
-    };
-
-    try {
-        showBackdrop('Saving settings...');
-        const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(settings)
-        });
-        hideBackdrop();
-
-        if (!response.ok) {
-            throw new Error('Failed to save settings');
-        }
-
-        showAlert('Settings saved successfully', 'Success');
-        updatePreview(settings);
-
-    } catch (error) {
-        showAlert(`${error.message}`, 'Error');
-    }
-});
 
 wifiForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1251,48 +1259,48 @@ let allImages = [];
 
 function updateGallery(images, folders) {
     gallery.innerHTML = '';
-    
+
     // Store all folders and images for reference
     if (folders) {
         allFolders = folders;
     }
-    
+
     if (images) {
         allImages = images;
     }
-    
+
     // Get folders for the current level
     const currentFolders = allFolders.filter(folder => folder.parent === currentFolderId);
-    
+
     // Get images for the current folder
     const currentImages = allImages.filter(image => image.parent === currentFolderId);
-    
+
     if (currentFolders.length === 0 && currentImages.length === 0) {
         gallery.innerHTML = '<p>This folder is empty.</p>';
-        
+
         // Still update folder path and select even if folder is empty
         updateScreensaverOptions();
         updateFolderPath();
         updateFolderSelect();
         return;
     }
-    
+
     // Sort folders alphabetically
     currentFolders.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-    
+
     // Sort images alphabetically
     currentImages.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-    
+
     // Add folders first
     currentFolders.forEach(folder => {
         addFolderToGallery(folder);
     });
-    
+
     // Then add images
     currentImages.forEach(image => {
         addImageToGallery(image);
     });
-    
+
     updateScreensaverOptions();
     updateFolderPath();
     updateFolderSelect();
@@ -1304,11 +1312,11 @@ function addFolderToGallery(folder) {
     if (emptyMessage && emptyMessage.textContent === 'This folder is empty.') {
         gallery.innerHTML = '';
     }
-    
+
     const item = document.createElement('div');
     item.className = 'folder-item';
     item.id = `folder-${folder.id}`;
-    
+
     item.innerHTML = `
         <div class="folder-icon" data-id="${folder.id}">📁</div>
         <div class="folder-name">${folder.name}</div>
@@ -1318,9 +1326,9 @@ function addFolderToGallery(folder) {
             <button class="icon-btn delete-folder-btn" data-id="${folder.id}" title="Delete Folder">🚮</button>
         </div>
     `;
-    
+
     gallery.appendChild(item);
-    
+
     // Add event listeners
     item.querySelector('.folder-icon').addEventListener('click', () => navigateToFolder(folder.id));
     item.querySelector('.rename-folder-btn').addEventListener('click', () => showRenameFolderInput(folder.id));
@@ -1483,18 +1491,18 @@ function updateSettings(settings) {
     // Update screensaver selection
     if (settings.screensaver) {
         screensaverSelect.value = settings.screensaver;
-        
+
         // Update screensaver preview
         const screensaverImg = document.getElementById('screensaver-preview-img');
         const screensaverText = document.getElementById('screensaver-preview-text');
-        
+
         // Find the image in the gallery
         const galleryImg = document.querySelector(`#image-${settings.screensaver} img`);
         if (galleryImg) {
             // Use the thumbnail for the preview
             const path = galleryImg.dataset.thumbPath;
             const imgUrl = `/img/${path}?t=${Date.now()}`;
-            
+
             screensaverImg.src = imgUrl;
             screensaverImg.alt = galleryImg.alt;
             screensaverImg.style.display = 'block';
@@ -1507,11 +1515,11 @@ function updateSettings(settings) {
         }
     } else {
         screensaverSelect.value = '';
-        
+
         // Show "No screensaver selected" text
         const screensaverImg = document.getElementById('screensaver-preview-img');
         const screensaverText = document.getElementById('screensaver-preview-text');
-        
+
         screensaverText.textContent = 'No screensaver selected';
         screensaverText.style.display = 'block';
         screensaverImg.style.display = 'none';
@@ -1520,7 +1528,7 @@ function updateSettings(settings) {
     // Highlight current display image
     document.querySelectorAll('.gallery-item').forEach(item => {
         item.classList.remove('active');
-        
+
         // Remove screensaver indicator
         const thumbContainer = item.querySelector('.thumb-container');
         if (thumbContainer) {
@@ -1570,8 +1578,6 @@ function updatePreview(settings) {
             img.src = imgUrl;
 
             previewStatus.textContent = `Currently displaying: ${galleryImg.alt}`;
-        } else {
-            previewStatus.textContent = 'Error: Selected image not found in gallery.';
         }
     } else if (settings.screensaver) {
         // Find the screensaver image
@@ -1593,8 +1599,6 @@ function updatePreview(settings) {
             img.src = imgUrl;
 
             previewStatus.textContent = `Showing screensaver: ${screensaverName}`;
-        } else {
-            previewStatus.textContent = 'Error: Screensaver image not found in gallery.';
         }
     } else {
         // No image is displayed
@@ -1628,25 +1632,25 @@ async function setAsScreensaver(imageId) {
     // Find the image name for the confirmation dialog
     const imageElement = document.querySelector(`#image-${imageId} .gallery-title`);
     const imageName = imageElement ? imageElement.textContent : 'this image';
-    
+
     // Show confirmation dialog
     const confirmed = await showConfirm(`Set "${imageName}" as the screensaver?`);
-    
+
     if (!confirmed) {
         return;
     }
-    
+
     try {
         showBackdrop('Setting screensaver...');
-        
+
         // Update the hidden select element
         screensaverSelect.value = imageId;
-        
+
         // Save the settings
         const settings = {
             screensaver: imageId
         };
-        
+
         const response = await fetch('/api/settings', {
             method: 'POST',
             headers: {
@@ -1654,16 +1658,16 @@ async function setAsScreensaver(imageId) {
             },
             body: JSON.stringify(settings)
         });
-        
+
         hideBackdrop();
-        
+
         if (!response.ok) {
             throw new Error('Failed to set screensaver');
         }
 
         // Update the UI
         updateSettings(settings);
-        
+
     } catch (error) {
         hideBackdrop();
         showAlert(`Error: ${error.message}`, 'Error');
@@ -1673,7 +1677,7 @@ async function setAsScreensaver(imageId) {
 async function deleteImage(imageId) {
     try {
         const confirmed = await showConfirm('Are you sure you want to delete this image?', 'Delete Image');
-        
+
         if (!confirmed) {
             return;
         }
@@ -1749,73 +1753,74 @@ async function openCropModal(imageId) {
 
         // Show the modal
         cropModal.classList.add('active');
+        cropPreviewCtx.clearRect(0, 0, cropPreviewCanvas.width, cropPreviewCanvas.height);
 
         setTimeout(() => {
             cropPreviewContainer.style.width = '95%';
             cropPreviewContainer.style.aspectRatio = '16/9';
-            cropPreviewContainer.style.height = ((cropPreviewContainer.clientWidth / 16)*9) + 'px';
+            cropPreviewContainer.style.height = ((cropPreviewContainer.clientWidth / 16) * 9) + 'px';
 
             // Set up event listeners for crop selection dragging
             setupCropDragListeners();
-        }, 10);
 
-        currentCropImageId = imageId;
+            currentCropImageId = imageId;
 
-        // Load the image into the crop preview
-        const imgUrl = `/img/${currentImageData.path}?t=${Date.now()}`;
+            // Load the image into the crop preview
+            const imgUrl = `/img/${currentImageData.path}?t=${Date.now()}&w=${cropPreviewContainer.clientWidth}`;
 
-        // Create a new Image object
-        currentImageElement = new Image();
+            // Create a new Image object
+            currentImageElement = new Image();
 
-        // Wait for image to load to get its dimensions
-        currentImageElement.onload = () => {
-            const containerRect = cropPreviewContainer.getBoundingClientRect();
+            // Wait for image to load to get its dimensions
+            currentImageElement.onload = () => {
+                const containerRect = cropPreviewContainer.getBoundingClientRect();
 
-            // Set initial crop selection based on stored values or defaults
-            if (currentImageData.crop) {
-                const scale = containerRect.width / 1920;
-                cropSelectionWidth = currentImageData.crop.w * scale;
-                currentImageData.crop.h = Math.round(currentImageData.crop.w / ASPECT_RATIO);
-                cropSelectionHeight = currentImageData.crop.h * scale;
-                cropSelectionX = currentImageData.crop.x * scale;
-                cropSelectionY = currentImageData.crop.y * scale;
+                // Set initial crop selection based on stored values or defaults
+                if (currentImageData.crop) {
+                    const scale = containerRect.width / 1920;
+                    cropSelectionWidth = currentImageData.crop.w * scale;
+                    currentImageData.crop.h = Math.round(currentImageData.crop.w / ASPECT_RATIO);
+                    cropSelectionHeight = currentImageData.crop.h * scale;
+                    cropSelectionX = currentImageData.crop.x * scale;
+                    cropSelectionY = currentImageData.crop.y * scale;
+                } else {
+                    // Default to full preview with 16:9 aspect ratio (1920x1080)
+                    // Calculate the size to fit the container
+                    cropSelectionWidth = containerRect.width;
+                    cropSelectionHeight = containerRect.height;
+                    cropSelectionX = 0;
+                    cropSelectionY = 0;
+                }
+
+                cropSelection.style.width = `${cropSelectionWidth}px`;
+                cropSelection.style.height = `${cropSelectionHeight}px`;
+                // Position the crop selection
+                cropSelection.style.left = `${cropSelectionX}px`;
+                cropSelection.style.top = `${cropSelectionY}px`;
+
+                // Draw the image on the canvas with transformations
+                drawImageContain(cropPreviewCtx, currentImageElement, cropPreviewCanvas.width, cropPreviewCanvas.height);
+
+                // Apply transformations to the preview image
+                applyPreviewTransformations();
+            };
+
+            // Set the image source to start loading
+            currentImageElement.src = imgUrl;
+
+            // Set mirror checkboxes based on stored values
+            if (currentImageData.mirror) {
+                mirrorHCheckbox.checked = currentImageData.mirror.h;
+                mirrorVCheckbox.checked = currentImageData.mirror.v;
             } else {
-                // Default to full preview with 16:9 aspect ratio (1920x1080)
-                // Calculate the size to fit the container
-                cropSelectionWidth = containerRect.width;
-                cropSelectionHeight = containerRect.height;
-                cropSelectionX = 0;
-                cropSelectionY = 0;
+                mirrorHCheckbox.checked = false;
+                mirrorVCheckbox.checked = false;
             }
 
-            cropSelection.style.width = `${cropSelectionWidth}px`;
-            cropSelection.style.height = `${cropSelectionHeight}px`;
-            // Position the crop selection
-            cropSelection.style.left = `${cropSelectionX}px`;
-            cropSelection.style.top = `${cropSelectionY}px`;
+            // Set rotation based on stored value
+            currentRotation = currentImageData.rotate || 0;
 
-            // Draw the image on the canvas with transformations
-            drawImageContain(cropPreviewCtx, currentImageElement, cropPreviewCanvas.width, cropPreviewCanvas.height);
-
-            // Apply transformations to the preview image
-            applyPreviewTransformations();
-        };
-
-        // Set the image source to start loading
-        currentImageElement.src = imgUrl;
-
-        // Set mirror checkboxes based on stored values
-        if (currentImageData.mirror) {
-            mirrorHCheckbox.checked = currentImageData.mirror.h;
-            mirrorVCheckbox.checked = currentImageData.mirror.v;
-        } else {
-            mirrorHCheckbox.checked = false;
-            mirrorVCheckbox.checked = false;
-        }
-
-        // Set rotation based on stored value
-        currentRotation = currentImageData.rotate || 0;
-
+        }, 10);
 
 
     } catch (error) {
@@ -1878,7 +1883,7 @@ function applyPreviewTransformations() {
         // Image is wider than canvas (relative to height)
         drawWidth = canvasWidth;
         drawHeight = drawWidth / imgAspect;
-        if(flip_wh){
+        if (flip_wh) {
             ([drawHeight, drawWidth] = [drawWidth, drawHeight]);
         }
         offsetX = 0;
@@ -1887,7 +1892,7 @@ function applyPreviewTransformations() {
         // Image is taller than canvas (relative to width)
         drawHeight = canvasHeight;
         drawWidth = drawHeight * imgAspect;
-        if(flip_wh){
+        if (flip_wh) {
             ([drawHeight, drawWidth] = [drawWidth, drawHeight]);
         }
         offsetX = (canvasWidth - drawWidth) / 2;
@@ -1936,9 +1941,9 @@ function setupCropDragListeners() {
         cropStartY = pos.clientY - cropSelectionY;
         e.preventDefault();
     }
-    
+
     cropSelection.addEventListener('mousedown', handleDragStart);
-    cropSelection.addEventListener('touchstart', handleDragStart, { passive: false });
+    cropSelection.addEventListener('touchstart', handleDragStart, {passive: false});
 
     // Mouse/Touch down on resize handles
     const resizeHandles = cropSelection.querySelectorAll('.resize-handle');
@@ -1952,15 +1957,15 @@ function setupCropDragListeners() {
             e.preventDefault();
             e.stopPropagation(); // Prevent dragging from starting
         }
-        
+
         handle.addEventListener('mousedown', handleResizeStart);
-        handle.addEventListener('touchstart', handleResizeStart, { passive: false });
+        handle.addEventListener('touchstart', handleResizeStart, {passive: false});
     });
 
     // Mouse/Touch move (drag or resize)
     function handleMove(e) {
         const pos = getEventPosition(e);
-        
+
         // Handle dragging
         if (cropDragging) {
             // Calculate new position
@@ -2046,9 +2051,9 @@ function setupCropDragListeners() {
             cropStartY = pos.clientY;
         }
     }
-    
+
     document.addEventListener('mousemove', handleMove);
-    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchmove', handleMove, {passive: false});
 
     // Mouse/Touch up (end drag or resize)
     function handleEnd() {
@@ -2056,7 +2061,7 @@ function setupCropDragListeners() {
         cropResizing = false;
         currentResizeHandle = null;
     }
-    
+
     document.addEventListener('mouseup', handleEnd);
     document.addEventListener('touchend', handleEnd);
 
