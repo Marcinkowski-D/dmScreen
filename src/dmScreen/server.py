@@ -2,8 +2,12 @@ import os
 import uuid
 import socket
 import time
+import threading
+import concurrent.futures
 from datetime import datetime
 from io import BytesIO
+import hashlib
+import functools
 
 from flask import (
     Flask,
@@ -40,6 +44,7 @@ from dmScreen.wifi import register_wifi_routes, start_wifi_monitor
 BASE_DIR = os.getcwd()
 DATA_FOLDER = os.path.join(BASE_DIR, 'data')
 UPLOAD_FOLDER = os.path.join(DATA_FOLDER, 'uploads')
+CACHE_FOLDER = os.path.join(DATA_FOLDER, 'cache')
 WWW_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'www')
 DATABASE_FILE = os.path.join(DATA_FOLDER, 'database.json')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
@@ -47,6 +52,7 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 # Create necessary directories
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(CACHE_FOLDER, exist_ok=True)
 
 # Initialize Flask app
 app = Flask(__name__, static_folder=WWW_FOLDER)
@@ -55,6 +61,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max upload
 
 db: Database = None
 last_update_timestamp = time.time()
+last_cache_cleanup = time.time()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -63,6 +70,56 @@ def update_timestamp():
     global last_update_timestamp
     print('setting timestamp')
     last_update_timestamp = time.time()
+    
+def cleanup_cache(max_age=86400, max_size=500*1024*1024):  # Default: 1 day, 500MB
+    """Clean up old cache files to prevent the cache from growing too large"""
+    global last_cache_cleanup
+    
+    # Only run cleanup once per hour
+    current_time = time.time()
+    if current_time - last_cache_cleanup < 3600:
+        return
+        
+    last_cache_cleanup = current_time
+    
+    try:
+        print("Running cache cleanup...")
+        if not os.path.exists(CACHE_FOLDER):
+            return
+            
+        # Get all files in cache directory with their modification times
+        cache_files = []
+        total_size = 0
+        
+        for filename in os.listdir(CACHE_FOLDER):
+            file_path = os.path.join(CACHE_FOLDER, filename)
+            if os.path.isfile(file_path):
+                file_stat = os.stat(file_path)
+                cache_files.append((file_path, file_stat.st_mtime, file_stat.st_size))
+                total_size += file_stat.st_size
+                
+        # If total size is under the limit and no old files, return
+        if total_size < max_size and all(current_time - mtime < max_age for _, mtime, _ in cache_files):
+            return
+            
+        # Sort by modification time (oldest first)
+        cache_files.sort(key=lambda x: x[1])
+        
+        # Remove old files and/or reduce cache size
+        for file_path, mtime, size in cache_files:
+            # Remove if older than max_age or if we need to reduce cache size
+            if current_time - mtime > max_age or total_size > max_size:
+                os.remove(file_path)
+                total_size -= size
+                print(f"Removed cache file: {file_path}")
+                
+            # Stop if we're under the size limit
+            if total_size <= max_size * 0.8:  # 80% of max to provide buffer
+                break
+                
+        print("Cache cleanup completed")
+    except Exception as e:
+        print(f"Error during cache cleanup: {e}")
 
 # Routes
 @app.route('/')
@@ -89,6 +146,9 @@ def view():
 
 @app.route('/img/<path:path>')
 def serve_img(path):
+    # Run cache cleanup periodically
+    cleanup_cache()
+    
     # Get query parameters
     w = request.args.get("w", None)
     if w is not None:
@@ -101,47 +161,90 @@ def serve_img(path):
     is_thumb = path.startswith('thumb_')
     file_path = os.path.join(UPLOAD_FOLDER, path)
     
+    # Create a cache key based on the path and width
+    cache_key = f"{path}_{w}_{'crop' if crop else 'nocrop'}"
+    cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
+    cache_path = os.path.join(CACHE_FOLDER, f"{cache_hash}.webp")
     
+    # Function to generate thumbnail in a separate thread
+    def generate_thumbnail(original_path, file_path):
+        try:
+            original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
+            with Image.open(original_file_path) as img:
+                # Convert to RGB if image has transparency
+                if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
+                    img = background
+                
+                # Get original dimensions
+                width, height = img.size
+                
+                # Calculate new dimensions while maintaining aspect ratio
+                if width > height:
+                    new_width = 250
+                    new_height = int(height * (250 / width))
+                else:
+                    new_height = 250
+                    new_width = int(width * (250 / height))
+                
+                # Resize using BILINEAR filter (faster than default)
+                img = img.resize((new_width, new_height), Image.BILINEAR)
+                
+                # Save as WebP with optimized settings
+                if file_path.lower().endswith('.webp'):
+                    img.save(file_path, format="WebP", quality=85)
+                    new_path = path
+                else:
+                    # Get the filename without extension
+                    base_name = os.path.splitext(file_path)[0]
+                    new_file_path = f"{base_name}.webp"
+                    img.save(new_file_path, format="WebP", quality=85)
+                    file_path = new_file_path
+                    new_path = os.path.basename(new_file_path)
+                
+                # Update database to include thumb_path
+                db.updateImageThumbnail(original_path, new_path)
+                return file_path
+        except Exception as e:
+            print(f"Error creating thumbnail on-demand: {e}")
+            return None
     
     if os.path.exists(file_path) and os.path.isfile(file_path):
+        # Check if a cached version exists
+        if os.path.exists(cache_path) and os.path.isfile(cache_path):
+            # Use cached image
+            print(f"Using cached image: {cache_path}")
+            response = send_file(
+                cache_path,
+                mimetype='image/webp',
+                as_attachment=False
+            )
+            response.headers['Cache-Control'] = 'max-age=86400'  # Cache for 24 hours
+            return response
+            
         # Check if this is a thumbnail request
         if is_thumb:
             # If thumbnail doesn't exist but original image does, generate it
             original_path = path[6:]  # Remove 'thumb_' prefix
             original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
             if not os.path.exists(file_path) and os.path.exists(original_file_path):
-                try:
-                    # Generate thumbnail using the same logic as in upload_image
-                    with Image.open(original_file_path) as img:
-                        # Convert to RGB if image has transparency
-                        if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                            background = Image.new('RGB', img.size, (255, 255, 255))
-                            background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
-                            img = background
-                        
-                        # Create thumbnail
-                        img.thumbnail((250, 250))
-                        
-                        # Save as WebP
-                        if file_path.lower().endswith('.webp'):
-                            img.save(file_path, format="WebP", interlace=1)
-                        else:
-                            # Get the filename without extension
-                            base_name = os.path.splitext(file_path)[0]
-                            new_file_path = f"{base_name}.webp"
-                            img.save(new_file_path, format="WebP", interlace=1)
+                # Start thumbnail generation in a separate thread
+                # For on-demand thumbnails, we'll wait for the result since we need it immediately
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(generate_thumbnail, original_path, file_path)
+                    try:
+                        new_file_path = future.result(timeout=10)  # Wait up to 10 seconds
+                        if new_file_path:
                             file_path = new_file_path
                             path = os.path.basename(new_file_path)
-                        
-                        # Update database to include thumb_path
-                        db.updateImageThumbnail(original_path, path)
-                except Exception as e:
-                    print(f"Error creating thumbnail on-demand: {e}")
-        # search database enty
+                    except concurrent.futures.TimeoutError:
+                        print("Thumbnail generation timed out")
+        
+        # search database entry
         image_meta = next((img for img in db.get_database()['images'] if img['path'] == path or img['thumb_path'] == path), None)
 
         if crop:
-
             crop_path = os.path.join(UPLOAD_FOLDER, 'crop_'+path)
             if os.path.exists(crop_path) and os.path.isfile(crop_path):
                 response = send_from_directory(directory=UPLOAD_FOLDER, path='crop_'+path)
@@ -209,25 +312,24 @@ def serve_img(path):
 
         w = w if w is not None else 1920
 
+        # Use BILINEAR filter for faster resizing
         if img.size[0] > w:
             h = int(w / (img.size[0]/img.size[1]))
-            img = img.resize((w, h))
+            img = img.resize((w, h), Image.BILINEAR)
         if img.size[1] > 1080:
             w = int(1080 * (img.size[0]/img.size[1]))
-            img = img.resize((w, 1080))
+            img = img.resize((w, 1080), Image.BILINEAR)
 
-        img_io = BytesIO()
-        img.save(img_io, 'WebP', interlace=1)
-        img_io.seek(0)
-
+        # Save to cache
+        img.save(cache_path, format="WebP", quality=85)
+        
+        # Return the image
         response = send_file(
-            img_io,
+            cache_path,
             mimetype='image/webp',
             as_attachment=False
         )
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
+        response.headers['Cache-Control'] = 'max-age=86400'  # Cache for 24 hours
         return response
     else:
         return f"File not found: {file_path}", 404
@@ -425,79 +527,92 @@ def upload_image():
         if not folder_exists:
             return jsonify({'error': 'Folder not found'}), 404
     
-    for i, file in enumerate(files):
+    # Function to process a single image in a separate thread
+    def process_image(file_index, file):
         print('processing file', file.filename)
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            # Add timestamp to filename to avoid conflicts
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            filename = f"{timestamp}_{filename}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
+        if not file or not allowed_file(file.filename):
+            return None
+            
+        filename = secure_filename(file.filename)
+        # Add timestamp to filename to avoid conflicts
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        filename = f"{timestamp}_{filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        thumb_filename = filename  # Default in case of failure
+        
+        try:
+            with Image.open(filepath) as img:
+                processed_img = img.copy()
+                if filepath.lower().endswith('.webp'):
+                    processed_img.save(filepath, format="WebP")
+                else:
+                    # Get the filename without extension
+                    base_name = os.path.splitext(filepath)[0]
+                    new_filepath = f"{base_name}.webp"
+                    processed_img.save(new_filepath, format="WebP")
+                    # Update the filepath and filename
+                    os.remove(filepath)  # Remove the original file
+                    filepath = new_filepath
+                    filename = os.path.basename(new_filepath)
 
-            try:
-                with Image.open(filepath) as img:
-                    processed_img = img.copy()
-                    if filepath.lower().endswith('.webp'):
-                        processed_img.save(filepath, format="WebP")
-                    else:
-                        # Get the filename without extension
-                        base_name = os.path.splitext(filepath)[0]
-                        new_filepath = f"{base_name}.webp"
-                        processed_img.save(new_filepath, format="WebP")
-                        # Update the filepath and filename
-                        os.remove(filepath)  # Remove the original file
-                        filepath = new_filepath
-                        filename = os.path.basename(new_filepath)
+                print(f"Saved image {filename} as WebP")
+        except Exception as e:
+            print(f"Error processing image: {e}")
+            return None
+        
+        # Create thumbnail
+        thumb_filename = f"thumb_{filename}"
+        thumb_filepath = os.path.join(app.config['UPLOAD_FOLDER'], thumb_filename)
+        try:
+            # Open the image and create a thumbnail
+            with Image.open(filepath) as img:
+                # Calculate new dimensions while maintaining aspect ratio
+                img.thumbnail((250, 250))
 
-                    print(f"Saved image {filename} as WebP")
-            except Exception as e:
-                print(f"Error processing image: {e}")
-            
-            # Create thumbnail
-            thumb_filename = f"thumb_{filename}"
-            thumb_filepath = os.path.join(app.config['UPLOAD_FOLDER'], thumb_filename)
-            try:
-                # Open the image and create a thumbnail
-                with Image.open(filepath) as img:
-                    # Calculate new dimensions while maintaining aspect ratio
-                    img.thumbnail((250, 250))
-
-                    if thumb_filepath.lower().endswith('.webp'):
-                        img.save(thumb_filepath, format="WebP")
-                    else:
-                        # Get the filename without extension
-                        base_name = os.path.splitext(thumb_filepath)[0]
-                        new_thumb_filepath = f"{base_name}.webp"
-                        img.save(new_thumb_filepath, format="WebP")
-                        # Update the thumbnail filepath and filename
-                        thumb_filename = os.path.basename(new_thumb_filepath)
-            except Exception as e:
-                print(f"Error creating thumbnail: {e}")
-                # If thumbnail creation fails, use the original image path
-                thumb_filename = filename
-            
-            # Get name from the names list if available, otherwise use filename without extension
-            name = names[i] if i < len(names) else os.path.splitext(file.filename)[0]
-            
-            # Create image entry
-            image_id = str(uuid.uuid4())
-            image_data = {
-                'id': image_id,
-                'name': name,
-                'path': filename,
-                'thumb_path': thumb_filename,
-                'uploaded_at': datetime.now().isoformat(),
-                'parent': folder_id  # Set the parent folder ID
-            }
-            
-            # Add to database
-            db.appendImage(image_data)
-            
-            # Update timestamp to notify clients about changes
-            # update_timestamp()
-            
-            uploaded_images.append(image_data)
+                if thumb_filepath.lower().endswith('.webp'):
+                    img.save(thumb_filepath, format="WebP")
+                else:
+                    # Get the filename without extension
+                    base_name = os.path.splitext(thumb_filepath)[0]
+                    new_thumb_filepath = f"{base_name}.webp"
+                    img.save(new_thumb_filepath, format="WebP")
+                    # Update the thumbnail filepath and filename
+                    thumb_filename = os.path.basename(new_thumb_filepath)
+        except Exception as e:
+            print(f"Error creating thumbnail: {e}")
+            # If thumbnail creation fails, use the original image path
+            thumb_filename = filename
+        
+        # Get name from the names list if available, otherwise use filename without extension
+        name = names[file_index] if file_index < len(names) else os.path.splitext(file.filename)[0]
+        
+        # Create image entry
+        image_id = str(uuid.uuid4())
+        image_data = {
+            'id': image_id,
+            'name': name,
+            'path': filename,
+            'thumb_path': thumb_filename,
+            'uploaded_at': datetime.now().isoformat(),
+            'parent': folder_id  # Set the parent folder ID
+        }
+        
+        return image_data
+    
+    # Process images in parallel using ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Submit all image processing tasks to the executor
+        future_to_index = {executor.submit(process_image, i, file): i for i, file in enumerate(files)}
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_index):
+            image_data = future.result()
+            if image_data:
+                # Add to database (this needs to be thread-safe)
+                db.appendImage(image_data)
+                uploaded_images.append(image_data)
     
     if uploaded_images:
         return jsonify(uploaded_images), 201
@@ -628,6 +743,42 @@ def reset_display():
     update_timestamp()
     
     return jsonify({'success': True})
+
+@app.route('/api/image/<image_id>/url', methods=['GET'])
+def get_image_url(image_id):
+    """Get the URL for an image by its ID"""
+    # Get query parameters
+    w = request.args.get("w", None)
+    crop = request.args.get("crop", "true").lower() == "true"
+    thumb = request.args.get("thumb", "false").lower() == "true"
+    
+    # Find the image in the database
+    database = db.get_database()
+    image = next((img for img in database['images'] if img['id'] == image_id), None)
+    
+    if not image:
+        return jsonify({'error': 'Image not found'}), 404
+    
+    # Construct the URL
+    path = image['path']
+    if thumb:
+        path = image['thumb_path'] if 'thumb_path' in image else f"thumb_{path}"
+    
+    # Add crop prefix if needed
+    url_prefix = 'crop_' if crop else ''
+    
+    # Construct the base URL
+    base_url = f"/img/{url_prefix}{path}"
+    
+    # Add width parameter if specified
+    url = f"{base_url}?t={int(time.time())}"
+    if w:
+        url += f"&w={w}"
+    
+    return jsonify({
+        'url': url,
+        'name': image['name']
+    })
 
 def main():
     global db

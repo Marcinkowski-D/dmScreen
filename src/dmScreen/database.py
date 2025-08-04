@@ -1,6 +1,7 @@
 # Database functions
 import os
 import json
+import threading
 from datetime import datetime
 
 from flask import jsonify
@@ -24,21 +25,25 @@ class Database:
 
     def __init__(self, db_file):
         self.db_file = db_file
+        self.lock = threading.RLock()  # Reentrant lock for thread safety
         self.init_database()
 
 
     def init_database(self):
-        if not os.path.exists(self.db_file):
-            with open(self.db_file, 'w') as f:
-                json.dump(DEFAULT_DATABASE, f, indent=4)
+        with self.lock:
+            if not os.path.exists(self.db_file):
+                with open(self.db_file, 'w') as f:
+                    json.dump(DEFAULT_DATABASE, f, indent=4)
 
-    def get_database(self ):
-        with open(self.db_file, 'r') as f:
-            return json.load(f)
+    def get_database(self):
+        with self.lock:
+            with open(self.db_file, 'r') as f:
+                return json.load(f)
 
     def save_database(self, data):
-        with open(self.db_file, 'w') as f:
-            json.dump(data, f, indent=4)
+        with self.lock:
+            with open(self.db_file, 'w') as f:
+                json.dump(data, f, indent=4)
 
     def appendImage(self, image_data):
         # Add default transformation properties if not present
@@ -131,6 +136,8 @@ class Database:
                 
         # Save the updated database
         self.save_database(db)
+        
+        # Remove cropped versions of the image
         try:
             os.remove(os.path.join(UPLOAD_FOLDER, 'crop_'+image['path']))
         except OSError:
@@ -139,6 +146,12 @@ class Database:
             os.remove(os.path.join(UPLOAD_FOLDER, 'crop_'+image['thumb_path']))
         except OSError:
             pass  # File might not exist
+            
+        # Invalidate cache for this image
+        self._invalidate_image_cache(image['path'])
+        if 'thumb_path' in image:
+            self._invalidate_image_cache(image['thumb_path'])
+            
         return image
         
     # Keep the old method for backward compatibility, but make it use the new approach
@@ -174,19 +187,20 @@ class Database:
         
     def updateImageThumbnail(self, image_path, thumb_path):
         """Update an image entry with a thumbnail path"""
-        db = self.get_database()
-        updated = False
-        
-        for image in db['images']:
-            if image['path'] == image_path and 'thumb_path' not in image:
-                image['thumb_path'] = thumb_path
-                updated = True
-                break
-                
-        if updated:
-            self.save_database(db)
+        with self.lock:
+            db = self.get_database()
+            updated = False
             
-        return updated
+            for image in db['images']:
+                if image['path'] == image_path and 'thumb_path' not in image:
+                    image['thumb_path'] = thumb_path
+                    updated = True
+                    break
+                    
+            if updated:
+                self.save_database(db)
+                
+            return updated
             
     def createFolder(self, folder_data):
         """Create a new folder

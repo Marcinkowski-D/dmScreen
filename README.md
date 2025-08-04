@@ -19,6 +19,9 @@ This mystical device allows you to maintain the atmosphere of your adventure whi
 - **Instant Transmission Spell**: Live updates to the player view using polling magic
 - **Arcane Thumbnail Creation**: Automatic generation of thumbnails for faster loading
 - **Dimensional Constraint Spell**: Automatically resizes large images to a maximum of 1920px width/height when displaying, keeping the original size stored
+- **Parallel Processing Enchantment**: Processes multiple images simultaneously using parallel threads for faster uploads
+- **Arcane Caching Enchantment**: Stores resized images in a cache for lightning-fast retrieval on subsequent requests
+- **Optimized Resizing Ritual**: Uses high-performance image resizing algorithms for faster processing, especially on Raspberry Pi
 - **Screensaver Illusion**: Configure a default image to display when no specific image is selected
 - **Mystical WiFi Configuration**: Set up network connectivity for your magical device
 - **Rotation Cantrip**: Rotate images to the perfect orientation
@@ -77,6 +80,18 @@ To brew this potion, you will need:
 3. Marvel at the seamless transitions as new images appear
 
 ## 🗝️ Advanced Enchantments
+
+### Image Caching System
+
+The DM Screen employs a powerful caching system to dramatically improve image loading performance, especially on Raspberry Pi devices:
+
+1. Resized images are automatically stored in a cache folder (`data/cache`)
+2. Subsequent requests for the same image at the same size are served directly from cache
+3. The cache is automatically cleaned up periodically to prevent excessive disk usage
+4. Old cache files (older than 24 hours) are automatically removed
+5. If the cache exceeds 500MB, the oldest files are removed first
+
+This caching system reduces image loading times from ~3 seconds to near-instant on Raspberry Pi devices.
 
 ### Network Configuration
 

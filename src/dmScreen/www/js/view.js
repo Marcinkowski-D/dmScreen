@@ -210,88 +210,104 @@ function updateDisplay(forceRefresh = false) {
     }
     
     // Function to load the image
-    const loadImage = () => {
+    const loadImage = async () => {
         if (imageToShow) {
             // If canvas was hidden, show it first
             displayCanvas.classList.remove('hidden');
             imageContainer.style.display = 'flex';
             
-            // Always add timestamp to prevent caching, use a stronger timestamp for force refresh
-            const timestamp = forceRefresh ? `?t=${Date.now()}&force=1` : `?t=${Date.now()}`;
-            
-            if (!isSwitchingToFullImage) {
-                // First load the thumbnail
-                const thumbnailPath = `/img/crop_thumb_${imageToShow.path}${timestamp}`;
-                
-                // Create a new Image object for the thumbnail
-                const thumbnailImg = new Image();
-                
-                // When the thumbnail loads, draw it on the canvas and fade it in
-                thumbnailImg.onload = () => {
-                    // Draw the image on the canvas
-                    drawImageContain(displayCtx, thumbnailImg, displayCanvas.width, displayCanvas.height);
+            try {
+                if (!isSwitchingToFullImage) {
+                    // First load the thumbnail by fetching the URL from the server
+                    const response = await fetch(`/api/image/${imageToShow.id}/url?thumb=true&crop=true&t=${Date.now()}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch thumbnail URL');
+                    }
                     
-                    // Fade in the canvas
-                    displayCanvas.classList.remove('fade-out');
-                    displayCanvas.classList.add('fade-in');
+                    const data = await response.json();
+                    const thumbnailUrl = data.url;
                     
-                    // Mark that we're now loading the full image
-                    displayCanvas.dataset.loadingFullImage = 'true';
+                    // Create a new Image object for the thumbnail
+                    const thumbnailImg = new Image();
                     
-                    // Reset transitioning state so the next updateDisplay call works
-                    isTransitioning = false;
+                    // When the thumbnail loads, draw it on the canvas and fade it in
+                    thumbnailImg.onload = () => {
+                        // Draw the image on the canvas
+                        drawImageContain(displayCtx, thumbnailImg, displayCanvas.width, displayCanvas.height);
+                        
+                        // Fade in the canvas
+                        displayCanvas.classList.remove('fade-out');
+                        displayCanvas.classList.add('fade-in');
+                        
+                        // Mark that we're now loading the full image
+                        displayCanvas.dataset.loadingFullImage = 'true';
+                        
+                        // Reset transitioning state so the next updateDisplay call works
+                        isTransitioning = false;
+                        
+                        // After thumbnail is displayed, load the full image
+                        setTimeout(() => {
+                            updateDisplay();
+                        }, 100);
+                    };
                     
-                    // After thumbnail is displayed, load the full image
-                    setTimeout(() => {
+                    // Handle thumbnail load errors
+                    thumbnailImg.onerror = () => {
+                        console.error('Failed to load thumbnail:', thumbnailUrl);
+                        // Fall back to loading the full image directly
+                        displayCanvas.dataset.loadingFullImage = 'true';
+                        // Reset transitioning state so the next updateDisplay call works
+                        isTransitioning = false;
                         updateDisplay();
-                    }, 100);
-                };
-                
-                // Handle thumbnail load errors
-                thumbnailImg.onerror = () => {
-                    console.error('Failed to load thumbnail:', thumbnailPath);
-                    // Fall back to loading the full image directly
-                    displayCanvas.dataset.loadingFullImage = 'true';
-                    // Reset transitioning state so the next updateDisplay call works
-                    isTransitioning = false;
-                    updateDisplay();
-                };
-                
-                // Start loading the thumbnail
-                thumbnailImg.src = thumbnailPath;
-            } else {
-                // Now load the full-size image
-                const imagePath = `/img/crop_${imageToShow.path}${timestamp}`;
-                
-                // Create a new Image object for the full image
-                const fullImg = new Image();
-                
-                // When the full image loads, draw it on the canvas and complete the transition
-                fullImg.onload = () => {
-                    // Draw the image on the canvas
-                    drawImageContain(displayCtx, fullImg, displayCanvas.width, displayCanvas.height);
+                    };
                     
-                    // Fade in the canvas
-                    displayCanvas.classList.remove('fade-out');
-                    displayCanvas.classList.add('fade-in');
-                    isTransitioning = false;
-                    // Clear the loading flag
-                    delete displayCanvas.dataset.loadingFullImage;
-                };
-                
-                // Handle full image load errors
-                fullImg.onerror = () => {
-                    console.error('Failed to load image:', imagePath);
-                    // Keep showing the thumbnail instead of showing nothing
-                    displayCanvas.classList.remove('fade-out');
-                    displayCanvas.classList.add('fade-in');
-                    isTransitioning = false;
-                    // Clear the loading flag
-                    delete displayCanvas.dataset.loadingFullImage;
-                };
-                
-                // Start loading the full image
-                fullImg.src = imagePath;
+                    // Start loading the thumbnail
+                    thumbnailImg.src = thumbnailUrl;
+                } else {
+                    // Now load the full-size image by fetching the URL from the server
+                    const forceParam = forceRefresh ? '&force=1' : '';
+                    const response = await fetch(`/api/image/${imageToShow.id}/url?crop=true&t=${Date.now()}${forceParam}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch image URL');
+                    }
+                    
+                    const data = await response.json();
+                    const imageUrl = data.url;
+                    
+                    // Create a new Image object for the full image
+                    const fullImg = new Image();
+                    
+                    // When the full image loads, draw it on the canvas and complete the transition
+                    fullImg.onload = () => {
+                        // Draw the image on the canvas
+                        drawImageContain(displayCtx, fullImg, displayCanvas.width, displayCanvas.height);
+                        
+                        // Fade in the canvas
+                        displayCanvas.classList.remove('fade-out');
+                        displayCanvas.classList.add('fade-in');
+                        isTransitioning = false;
+                        // Clear the loading flag
+                        delete displayCanvas.dataset.loadingFullImage;
+                    };
+                    
+                    // Handle full image load errors
+                    fullImg.onerror = () => {
+                        console.error('Failed to load image:', imageUrl);
+                        // Keep showing the thumbnail instead of showing nothing
+                        displayCanvas.classList.remove('fade-out');
+                        displayCanvas.classList.add('fade-in');
+                        isTransitioning = false;
+                        // Clear the loading flag
+                        delete displayCanvas.dataset.loadingFullImage;
+                    };
+                    
+                    // Start loading the full image
+                    fullImg.src = imageUrl;
+                }
+            } catch (error) {
+                console.error('Error fetching image URL:', error);
+                isTransitioning = false;
+                delete displayCanvas.dataset.loadingFullImage;
             }
         } else {
             // No image to display - hide the element completely

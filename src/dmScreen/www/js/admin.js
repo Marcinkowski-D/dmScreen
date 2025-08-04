@@ -783,50 +783,6 @@ async function showPrompt(message, defaultValue = '') {
     });
 }
 
-// Handle file selection
-function handleFileSelection(e) {
-    const files = e.target.files;
-
-    if (files.length === 0) {
-        imagePreviewContainer.style.display = 'none';
-        uploadButton.disabled = true;
-        return;
-    }
-
-    // Clear previous previews
-    imagePreviewList.innerHTML = '';
-
-    // Show preview container
-    imagePreviewContainer.style.display = 'block';
-    uploadButton.disabled = false;
-
-    // Add each file to the preview
-    Array.from(files).forEach((file, index) => {
-        // Create a preview row
-        const row = document.createElement('tr');
-        row.dataset.index = index;
-
-        // Get file name without extension for default name
-        const fileName = file.name.replace(/\.[^/.]+$/, "");
-
-        // Create a URL for the image preview
-        const imageUrl = URL.createObjectURL(file);
-
-        row.innerHTML = `
-            <td><img src="${imageUrl}" alt="${file.name}" class="preview-image"></td>
-            <td><input type="text" class="image-name-input" value="${fileName}" data-index="${index}"></td>
-            <td class="image-preview-actions">
-                <button type="button" class="icon-btn remove-image-btn" data-index="${index}">🚮</button>
-            </td>
-        `;
-
-        imagePreviewList.appendChild(row);
-
-        // Add event listener for remove button
-        row.querySelector('.remove-image-btn').addEventListener('click', () => removeImagePreview(index));
-    });
-}
-
 // Remove image from preview
 function removeImagePreview(index) {
     const row = document.querySelector(`tr[data-index="${index}"]`);
@@ -1496,23 +1452,30 @@ function updateSettings(settings) {
         const screensaverImg = document.getElementById('screensaver-preview-img');
         const screensaverText = document.getElementById('screensaver-preview-text');
 
-        // Find the image in the gallery
-        const galleryImg = document.querySelector(`#image-${settings.screensaver} img`);
-        if (galleryImg) {
-            // Use the thumbnail for the preview
-            const path = galleryImg.dataset.thumbPath;
-            const imgUrl = `/img/${path}?t=${Date.now()}`;
-
-            screensaverImg.src = imgUrl;
-            screensaverImg.alt = galleryImg.alt;
-            screensaverImg.style.display = 'block';
-            screensaverText.style.display = 'none';
-        } else {
-            // If image not found, show text
-            screensaverText.textContent = 'Selected screensaver image not found';
-            screensaverText.style.display = 'block';
-            screensaverImg.style.display = 'none';
-        }
+        // Fetch the image URL from the server
+        fetch(`/api/image/${settings.screensaver}/url?thumb=true&t=${Date.now()}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch screensaver image URL');
+                }
+                return response.json();
+            })
+            .then(data => {
+                const imgUrl = data.url;
+                const imageName = data.name;
+                
+                screensaverImg.src = imgUrl;
+                screensaverImg.alt = imageName;
+                screensaverImg.style.display = 'block';
+                screensaverText.style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error fetching screensaver image URL:', error);
+                // If image not found, show text
+                screensaverText.textContent = 'Selected screensaver image not found';
+                screensaverText.style.display = 'block';
+                screensaverImg.style.display = 'none';
+            });
     } else {
         screensaverSelect.value = '';
 
@@ -1558,17 +1521,22 @@ function updateSettings(settings) {
     updatePreview(settings);
 }
 
-function updatePreview(settings) {
+async function updatePreview(settings) {
     // Clear the canvas
     previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    const w = previewCanvas.clientWidth;
 
     if (settings.current_image) {
-        // Find the image in the gallery
-        const galleryImg = document.querySelector(`#image-${settings.current_image} img`);
-        if (galleryImg) {
-            // Use the original image path for the preview
-            const path = galleryImg.dataset.originalPath;
-            const imgUrl = `/img/crop_${path}?t=${Date.now()}`;
+        try {
+            // Fetch the image URL from the server
+            const response = await fetch(`/api/image/${settings.current_image}/url?w=${w}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch image URL');
+            }
+            
+            const data = await response.json();
+            const imgUrl = data.url;
+            const imageName = data.name;
 
             // Load the image and draw it on the canvas
             const img = new Image();
@@ -1577,19 +1545,25 @@ function updatePreview(settings) {
             };
             img.src = imgUrl;
 
-            previewStatus.textContent = `Currently displaying: ${galleryImg.alt}`;
+            previewStatus.textContent = `Currently displaying: ${imageName}`;
+        } catch (error) {
+            console.error('Error fetching image URL:', error);
+            previewStatus.textContent = 'Error loading preview';
         }
     } else if (settings.screensaver) {
-        // Find the screensaver image
-        const screensaverOption = Array.from(screensaverSelect.options).find(opt => opt.value === settings.screensaver);
-        const screensaverName = screensaverOption ? screensaverOption.textContent : 'Unknown';
-
-        // Find the image in the gallery
-        const galleryImg = document.querySelector(`#image-${settings.screensaver} img`);
-        if (galleryImg) {
-            // Use the original image path for the preview
-            const path = galleryImg.dataset.originalPath;
-            const imgUrl = `/img/crop_${path}?t=${Date.now()}`;
+        try {
+            // Find the screensaver name from the select element
+            const screensaverOption = Array.from(screensaverSelect.options).find(opt => opt.value === settings.screensaver);
+            const screensaverName = screensaverOption ? screensaverOption.textContent : 'Unknown';
+            
+            // Fetch the image URL from the server
+            const response = await fetch(`/api/image/${settings.screensaver}/url?w=${w}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch screensaver image URL');
+            }
+            
+            const data = await response.json();
+            const imgUrl = data.url;
 
             // Load the image and draw it on the canvas
             const img = new Image();
@@ -1599,6 +1573,9 @@ function updatePreview(settings) {
             img.src = imgUrl;
 
             previewStatus.textContent = `Showing screensaver: ${screensaverName}`;
+        } catch (error) {
+            console.error('Error fetching screensaver image URL:', error);
+            previewStatus.textContent = 'Error loading screensaver preview';
         }
     } else {
         // No image is displayed
