@@ -76,7 +76,6 @@ let settings = {
     current_image: null
 };
 let images = [];
-let screensaverTimeout = null;
 let isTransitioning = false;
 let lastUpdateTimestamp = 0;
 const POLLING_INTERVAL = 2000; // Poll every 2 seconds
@@ -183,8 +182,7 @@ async function fetchCurrentState() {
 function updateDisplay(forceRefresh = false) {
     // If already transitioning, don't start another transition
     if (isTransitioning) return;
-    
-    clearTimeout(screensaverTimeout);
+
     isTransitioning = true;
     
     // Determine which image to display
@@ -193,12 +191,7 @@ function updateDisplay(forceRefresh = false) {
     if (settings.current_image) {
         // Show the currently selected image
         imageToShow = images.find(img => img.id === settings.current_image);
-        
-        // Set timeout to show screensaver after 5 minutes of inactivity
-        screensaverTimeout = setTimeout(() => {
-            settings.current_image = null;
-            updateDisplay();
-        }, 5 * 60 * 1000);
+
     } else if (settings.screensaver) {
         // Show the screensaver image
         imageToShow = images.find(img => img.id === settings.screensaver);

@@ -236,9 +236,17 @@ def static_files(path):
 def get_current_state():
     global last_update_timestamp
     database = db.get_database()
+    
+    # Sort images alphabetically by name
+    images = sorted(database['images'], key=lambda x: x['name'].lower())
+    
+    # Sort folders alphabetically by name
+    folders = sorted(database['folders'], key=lambda x: x['name'].lower())
+    
     return jsonify({
         'settings': database['settings'],
-        'images': database['images'],
+        'images': images,
+        'folders': folders,
         'timestamp': last_update_timestamp
     })
 
@@ -251,7 +259,140 @@ def check_updates():
 
 @app.route('/api/images', methods=['GET'])
 def get_images():
-    return jsonify(db.get_database()['images'])
+    # Get query parameters
+    folder_id = request.args.get('folder', None)
+    
+    # Get all images
+    images = db.get_database()['images']
+    
+    # Filter by folder if specified
+    if folder_id:
+        images = [img for img in images if img.get('parent') == folder_id]
+    else:
+        # If no folder specified, return only root images (parent is None)
+        images = [img for img in images if img.get('parent') is None]
+    
+    # Sort images alphabetically by name
+    images = sorted(images, key=lambda x: x['name'].lower())
+    
+    return jsonify(images)
+    
+@app.route('/api/folders', methods=['GET'])
+def get_folders():
+    # Get query parameters
+    parent_id = request.args.get('parent', None)
+    
+    # Get all folders
+    folders = db.get_database()['folders']
+    
+    # Filter by parent if specified
+    if parent_id:
+        folders = [folder for folder in folders if folder.get('parent') == parent_id]
+    else:
+        # If no parent specified, return only root folders (parent is None)
+        folders = [folder for folder in folders if folder.get('parent') is None]
+    
+    # Sort folders alphabetically by name
+    folders = sorted(folders, key=lambda x: x['name'].lower())
+    
+    return jsonify(folders)
+
+@app.route('/api/folders', methods=['POST'])
+def create_folder():
+    # Get folder data from request
+    data = request.json
+    
+    if not data or 'name' not in data:
+        return jsonify({'error': 'Name is required'}), 400
+    
+    # Create folder data
+    folder_data = {
+        'id': str(uuid.uuid4()),
+        'name': data['name'],
+        'parent': data.get('parent'),
+        'created_at': datetime.now().isoformat()
+    }
+    
+    # Add folder to database
+    result = db.createFolder(folder_data)
+    
+    # Check if there was an error
+    if isinstance(result, tuple) and len(result) > 1 and isinstance(result[0], dict) and 'error' in result[0]:
+        return jsonify(result[0]), result[1]
+    
+    return jsonify(result), 201
+
+@app.route('/api/folders/<folder_id>', methods=['DELETE'])
+def delete_folder(folder_id):
+    # Delete folder
+    result = db.deleteFolder(folder_id)
+    
+    # Check if there was an error
+    if isinstance(result, tuple) and len(result) > 1 and isinstance(result[0], dict) and 'error' in result[0]:
+        return jsonify(result[0]), result[1]
+    
+    return jsonify(result)
+
+@app.route('/api/folders/<folder_id>/rename', methods=['POST'])
+def rename_folder(folder_id):
+    # Get new name from request
+    data = request.json
+    
+    if not data or 'name' not in data:
+        return jsonify({'error': 'Name is required'}), 400
+    
+    new_name = data.get('name')
+    
+    # Get the folder from database
+    db_data = db.get_database()
+    folder = next((f for f in db_data['folders'] if f['id'] == folder_id), None)
+    
+    if not folder:
+        return jsonify({'error': 'Folder not found'}), 404
+    
+    # Update folder name
+    folder['name'] = new_name
+    db.save_database(db_data)
+    
+    return jsonify(folder)
+
+@app.route('/api/folders/<folder_id>/move', methods=['POST'])
+def move_folder(folder_id):
+    # Get new parent ID from request
+    data = request.json
+    
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    new_parent_id = data.get('parent')
+    
+    # Move folder
+    result = db.moveFolder(folder_id, new_parent_id)
+    
+    # Check if there was an error
+    if isinstance(result, tuple) and len(result) > 1 and isinstance(result[0], dict) and 'error' in result[0]:
+        return jsonify(result[0]), result[1]
+    
+    return jsonify(result)
+
+@app.route('/api/images/<image_id>/move', methods=['POST'])
+def move_image(image_id):
+    # Get folder ID from request
+    data = request.json
+    
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    folder_id = data.get('folder')
+    
+    # Move image
+    result = db.moveImage(image_id, folder_id)
+    
+    # Check if there was an error
+    if isinstance(result, tuple) and len(result) > 1 and isinstance(result[0], dict) and 'error' in result[0]:
+        return jsonify(result[0]), result[1]
+    
+    return jsonify(result)
 
 @app.route('/api/images', methods=['POST'])
 def upload_image():
@@ -264,6 +405,16 @@ def upload_image():
     
     uploaded_images = []
     names = request.form.getlist('names[]') if 'names[]' in request.form else []
+    
+    # Get folder ID from form data
+    folder_id = request.form.get('folder', None)
+    
+    # Validate folder exists if specified
+    if folder_id:
+        db_data = db.get_database()
+        folder_exists = any(folder['id'] == folder_id for folder in db_data['folders'])
+        if not folder_exists:
+            return jsonify({'error': 'Folder not found'}), 404
     
     for i, file in enumerate(files):
         print('processing file', file.filename)
@@ -327,7 +478,8 @@ def upload_image():
                 'name': name,
                 'path': filename,
                 'thumb_path': thumb_filename,
-                'uploaded_at': datetime.now().isoformat()
+                'uploaded_at': datetime.now().isoformat(),
+                'parent': folder_id  # Set the parent folder ID
             }
             
             # Add to database
