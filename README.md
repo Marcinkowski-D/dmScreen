@@ -10,17 +10,22 @@ The Arcane DM Screen is a simple but powerful digital tool that enhances your ta
 
 This mystical device allows you to maintain the atmosphere of your adventure while providing visual context to your players, all controlled from your own administrative interface that remains hidden from their prying eyes.
 
+![DM Screen Screenshot](screenshot.png)
+
 ## ✨ Magical Properties
 
 - **Dual-Interface Enchantment**: Separate admin and view interfaces, allowing the DM to control what players see
 - **Image Repository of Holding**: Upload and manage an (un)limited collection of images
-- **Instant Transmission Spell**: Real-time updates to the player view using Socket.IO magic
+- **Instant Transmission Spell**: Live updates to the player view using polling magic
 - **Arcane Thumbnail Creation**: Automatic generation of thumbnails for faster loading
-- **Dimensional Constraint Spell**: Automatically resizes large images to a maximum of 1920px width/height
+- **Dimensional Constraint Spell**: Automatically resizes large images to a maximum of 1920px width/height when displaying, keeping the original size stored
 - **Screensaver Illusion**: Configure a default image to display when no specific image is selected
 - **Mystical WiFi Configuration**: Set up network connectivity for your magical device
 - **Rotation Cantrip**: Rotate images to the perfect orientation
 - **Renaming Ritual**: Change image names to suit your campaign needs
+- **Folders of Holding**: Create an unlimited number of folders for all your campaigns
+
+![DM Screen Screenshot 2](screenshot2.png)
 
 ## 🧪 Alchemical Requirements
 
@@ -34,22 +39,24 @@ To brew this potion, you will need:
 
 ## 🔮 Summoning the DM Screen
 
+### Standard Installation
+
 1. Create a virtual environment in a folder of your choice
    ```
    uv init
    uv venv
    ```
-1. Install the arcane artifact directly:
+2. Install the arcane artifact directly:
    ```
    uv pip install git+https://github.com/Marcinkowski-D/dmScreen.git
    ```
 
-2. Invoke the screen with the ancient command:
+3. Invoke the screen with the ancient command:
    ```
    python -m dmScreen.server
    ```
 
-3. Open your browser and navigate to:
+4. Open your browser and navigate to:
    - Admin interface: `http://your-screen-ip:5000/admin`
    - Player view: `http://localhost:5000/view`
 
@@ -57,7 +64,7 @@ To brew this potion, you will need:
 
 ### For the Dungeon Master
 
-1. Access the admin interface at `http://localhost:5000/admin`
+1. Access the admin interface at `http://your_ip:5000/admin`
 2. Upload images of characters, monsters, maps, or other visual aids
 3. Click on an image in the gallery to display it to your players
 4. Configure a screensaver image for when no specific image is displayed
@@ -99,14 +106,6 @@ sudo apt-get install hostapd dnsmasq
 
 These components are required for creating and managing the adhoc network when no WiFi connection is available.
 
-### Custom Database Location
-
-You can specify a custom location for the database file by setting the `DM_SCREEN_DB` environment variable:
-
-```
-export DM_SCREEN_DB=/path/to/your/database.json
-```
-
 ## 🧩 Contributing to the Grimoire
 
 Contributions to enhance this magical artifact are welcome! If you wish to add new spells (features) or fix cursed bugs:
@@ -127,9 +126,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 *May your dice roll high and your players be forever entertained!*
 
-## 🖥️ Raspberry Pi Zero W Setup - Kiosk Mode & Autostart
+## 🖥️ Raspberry Pi 3B+ Setup - Kiosk Mode & Autostart
 
-*A special enchantment for those wielding the power of the tiny magical artifact known as Raspberry Pi Zero (1/2) W*
+*A powerful enchantment for those wielding the Raspberry Pi 3B+ or faster magical artifacts (requires 1GB RAM for Chromium and WiFi connectivity)*
 
 ### Preparing Your Magical Device
 
@@ -141,10 +140,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    ```
    *Reboot your magical device after this incantation*
 
-3. Install the Chromium Seeing Glass:
+3. Install the required mystical components:
    ```
    sudo apt update
-   sudo apt install -y chromium-browser
+   sudo apt install -y chromium-browser hostapd dnsmasq unclutter
    ```
 
 ### Enchanting the Browser with Kiosk Magic
@@ -164,33 +163,49 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    [Desktop Entry]
    Type=Application
    Name=KioskBrowser
-   Exec=chromium-browser --noerrdialogs --kiosk http://127.0.0.1:5000
+   Exec=chromium-browser --noerrdialogs --kiosk http://127.0.0.1:5000/view
    X-GNOME-Autostart-enabled=true
    ```
    *Save and close the scroll with Ctrl+X, Y, Enter*
 
-4. Optional: Cast the Invisibility Spell on your cursor:
+4. Cast the Invisibility Spell on your cursor:
    ```
-   sudo apt install unclutter
+   sudo nano /etc/xdg/lxsession/LXDE-pi/autostart
+   ```
+   Add this line to the file:
+   ```
+   @unclutter -idle 0
    ```
 
 ### Binding the DM Screen to Your Device with Systemd Magic
 
-1. Create the service scroll:
+1. Clone the repository to your home:
+   ```
+   cd ~
+   git clone https://github.com/Marcinkowski-D/dmScreen.git
+   ```
+
+2. Make the startup script executable:
+   ```
+   cd dmScreen
+   chmod a+x dmScreen-start.sh
+   ```
+
+3. Create the service scroll:
    ```
    sudo nano /etc/systemd/system/dmscreen.service
    ```
 
-2. Inscribe these magical runes:
+4. Inscribe these magical runes:
    ```
    [Unit]
-   Description=DM Screen Webserver
+   Description=DM Screen Server
    After=network.target
 
    [Service]
-   User=pi
-   WorkingDirectory=/home/username/dmscreen
-   ExecStart=/home/username/dmscreen/.venv/bin/python -m dmScreen.server
+   User=root
+   WorkingDirectory=/home/pi/dmScreen
+   ExecStart=/usr/bin/bash dmScreen-start.sh
    Restart=always
    RestartSec=5
    Environment=PYTHONUNBUFFERED=1
@@ -198,21 +213,22 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    [Install]
    WantedBy=multi-user.target
    ```
-   *Adjust the path to your python interpreter as needed*
+   
+   If you don't want to use the adhoc network feature, you can restrict the user to "pi" (or something else)
 
-3. Activate the magical service:
+5. Activate the magical service:
    ```
    sudo systemctl daemon-reload
    sudo systemctl enable dmscreen.service
    sudo systemctl start dmscreen.service
    ```
 
-4. Verify your enchantment is working:
+6. Verify your enchantment is working:
    ```
    sudo systemctl status dmscreen.service
    ```
 
-5. Complete the ritual with a final reboot:
+7. Complete the ritual with a final reboot and watch the magic happen:
    ```
    sudo reboot
    ```
@@ -221,5 +237,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 Upon completion of this ritual, your Raspberry Pi will:
 - Automatically start the DM Screen webserver at boot
-- Launch Chromium in kiosk mode, displaying your DM Screen at http://127.0.0.1:5000
+- Launch Chromium in kiosk mode, displaying your DM Screen at http://127.0.0.1:5000/view
 - Create a dedicated display for your players, free from distractions of the mortal operating system
+- Create its own magical aura (adhoc network) if no WiFi connection is available
