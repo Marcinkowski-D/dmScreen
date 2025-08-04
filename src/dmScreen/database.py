@@ -97,7 +97,7 @@ class Database:
         # Update rotation if provided
         if 'rotate' in transform_data:
             # Ensure rotation is one of the allowed values
-            allowed_rotations = [0, 90, 180, -90]
+            allowed_rotations = [0, 90, 180, 270]
             rotation = transform_data['rotate']
             if rotation in allowed_rotations:
                 image['rotate'] = rotation

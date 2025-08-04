@@ -95,10 +95,14 @@ def serve_img(path):
     if path.startswith('crop_'):
         crop = True
         path = path[5:]
+    is_thumb = path.startswith('thumb_')
+    def pr (*args, **kwargs):
+        if not is_thumb:
+            print(*args, **kwargs)
     file_path = os.path.join(UPLOAD_FOLDER, path)
     if os.path.exists(file_path) and os.path.isfile(file_path):
         # Check if this is a thumbnail request
-        if path.startswith('thumb_'):
+        if is_thumb:
             # If thumbnail doesn't exist but original image does, generate it
             original_path = path[6:]  # Remove 'thumb_' prefix
             original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
@@ -138,21 +142,44 @@ def serve_img(path):
         if crop and image_meta.get("crop", None) is not None:
 
             img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+
+            if image_meta.get("mirror", None) is not None:
+                if image_meta["mirror"].get("h", False):
+                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                if image_meta["mirror"].get("v", False):
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+
+            flip_wh = False
             if image_meta.get("rotate", None) is not None:
-                img = img.rotate(-image_meta["rotate"])
+                r = image_meta["rotate"]
+                if r == 270:
+                    img = img.rotate(90, expand=True)
+                elif r == 180:
+                    img = img.rotate(180, expand=True)
+                elif r == 90:
+                    img = img.rotate(-90, expand=True)
+
             screen_size = (1920, 1080)
-            img_size = img.size
+            pr("screen size", screen_size)
             crop_data = image_meta['crop']
+            img_size = img.size
+            pr("img_size", img_size)
             img_pos = [0, 0]
             t_size = [0, 0]
             scale = 1
             if img_size[0] / img_size[1] < 16/9:
+                pr('mode 1')
+                pr("size", img_size)
                 scale = screen_size[1] / img_size[1]
+                pr("scale", scale)
                 tw = img_size[0] * scale
                 th = screen_size[1]
                 t_size = [tw, th]
+                pr("scaled size", t_size)
                 img_pos[0] = int((screen_size[0] - tw) / 2)
+                pr("img pos", img_pos)
             else:
+                pr('mode 2')
                 scale = screen_size[0] / img_size[0]
                 th = img_size[1] * scale
                 tw = screen_size[0]
@@ -163,6 +190,9 @@ def serve_img(path):
             c_y = crop_data.get("y")
             c_w = crop_data.get("w")
             c_h = int(c_w / 16 * 9)
+
+            pr(c_x, c_y, c_w, c_h)
+            pr(img_pos, t_size)
 
             x1 = max(img_pos[0], c_x) - img_pos[0]
             y1 = max(img_pos[1], c_y) - img_pos[1]
@@ -176,19 +206,13 @@ def serve_img(path):
 
             img = img.crop((x1, y1, x2, y2))
 
-            if image_meta.get("mirror", None) is not None:
-                if image_meta["mirror"].get("h", False):
-                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
-                if image_meta["mirror"].get("v", False):
-                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
-
             img_io = BytesIO()
-            img.save(img_io, 'JPEG')  # Oder PNG, wenn Transparenz
+            img.save(img_io, 'PNG')
             img_io.seek(0)
 
             response = send_file(
                 img_io,
-                mimetype='image/jpeg',
+                mimetype='image/png',
                 as_attachment=False
             )
         else:

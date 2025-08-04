@@ -5,7 +5,7 @@ const screensaverSelect = document.getElementById('screensaver');
 const saveSettingsBtn = document.getElementById('save-settings');
 const wifiStatus = document.getElementById('wifi-status');
 const wifiForm = document.getElementById('wifi-form');
-const previewImage = document.getElementById('preview-image');
+const previewCanvas = document.getElementById('preview-canvas');
 const previewStatus = document.getElementById('preview-status');
 const resetDisplayBtn = document.getElementById('reset-display');
 const imageFilesInput = document.getElementById('image-files');
@@ -18,7 +18,7 @@ const backdropText = document.getElementById('backdrop-text');
 // Crop Modal Elements
 const cropModal = document.getElementById('crop-modal');
 const cropPreviewContainer = document.getElementById('crop-preview-container');
-const cropPreviewImage = document.getElementById('crop-preview-image');
+const cropPreviewCanvas = document.getElementById('crop-preview-canvas');
 const cropSelection = document.getElementById('crop-selection');
 const mirrorHCheckbox = document.getElementById('mirror-h');
 const mirrorVCheckbox = document.getElementById('mirror-v');
@@ -26,6 +26,43 @@ const rotate_0 = document.getElementById('rotate-0');
 const rotate_90 = document.getElementById('rotate-90');
 const rotate_180 = document.getElementById('rotate-180');
 const rotate_270 = document.getElementById('rotate-270');
+
+// Canvas context
+const previewCtx = previewCanvas.getContext('2d');
+const cropPreviewCtx = cropPreviewCanvas.getContext('2d');
+
+// Helper function to draw an image on canvas in "contain" mode (16:9 aspect ratio)
+function drawImageContain(ctx, img, canvasWidth, canvasHeight) {
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+    // Calculate dimensions to fit the image within the canvas while maintaining aspect ratio
+    const imgWidth = img.width;
+    const imgHeight = img.height;
+    const imgAspect = imgWidth / imgHeight;
+    const canvasAspect = canvasWidth / canvasHeight;
+
+    let drawWidth, drawHeight, offsetX, offsetY;
+
+    if (imgAspect > canvasAspect) {
+        // Image is wider than canvas (relative to height)
+        drawWidth = canvasWidth;
+        drawHeight = drawWidth / imgAspect;
+        offsetX = 0;
+        offsetY = (canvasHeight - drawHeight) / 2;
+    } else {
+        // Image is taller than canvas (relative to width)
+        drawHeight = canvasHeight;
+        drawWidth = drawHeight * imgAspect;
+        offsetX = (canvasWidth - drawWidth) / 2;
+        offsetY = 0;
+    }
+    console.log(canvasWidth, canvasHeight);
+    console.log(drawWidth, drawHeight, offsetX, offsetY);
+
+    // Draw the image
+    ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+}
 
 const cropApplyBtn = document.getElementById('crop-apply-btn');
 const cropCancelBtn = document.getElementById('crop-cancel-btn');
@@ -240,9 +277,6 @@ uploadForm.addEventListener('submit', async (e) => {
     // Disable upload button and show loading spinner
     uploadButton.disabled = true;
     uploadButton.innerHTML = '<span class="spinner"></span> Uploading...';
-
-    // Hide image preview during upload
-    previewImage.style.display = 'none';
 
     const formData = new FormData();
     const files = imageFilesInput.files;
@@ -556,20 +590,26 @@ function updateSettings(settings) {
 }
 
 function updatePreview(settings) {
+    // Clear the canvas
+    previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+
     if (settings.current_image) {
         // Find the image in the gallery
-        const image = document.querySelector(`#image-${settings.current_image} img`);
-        if (image) {
+        const galleryImg = document.querySelector(`#image-${settings.current_image} img`);
+        if (galleryImg) {
             // Use the original image path for the preview
-            const thumb_path = image.dataset.thumbPath;
-            previewImage.src = `/img/crop_${thumb_path}?t=${Date.now()}`;
-            previewImage.alt = image.alt;
-            previewImage.style.display = 'block';
-            previewStatus.textContent = `Currently displaying: ${image.alt}`;
+            const thumb_path = galleryImg.dataset.thumbPath;
+            const imgUrl = `/img/crop_${thumb_path}?t=${Date.now()}`;
+
+            // Load the image and draw it on the canvas
+            const img = new Image();
+            img.onload = function () {
+                drawImageContain(previewCtx, img, previewCanvas.width, previewCanvas.height);
+            };
+            img.src = imgUrl;
+
+            previewStatus.textContent = `Currently displaying: ${galleryImg.alt}`;
         } else {
-            previewImage.src = '';
-            previewImage.alt = 'Image not found';
-            previewImage.style.display = 'none';
             previewStatus.textContent = 'Error: Selected image not found in gallery.';
         }
     } else if (settings.screensaver) {
@@ -578,25 +618,25 @@ function updatePreview(settings) {
         const screensaverName = screensaverOption ? screensaverOption.textContent : 'Unknown';
 
         // Find the image in the gallery
-        const image = document.querySelector(`#image-${settings.screensaver} img`);
-        if (image) {
+        const galleryImg = document.querySelector(`#image-${settings.screensaver} img`);
+        if (galleryImg) {
             // Use the original image path for the preview
-            const thumb_path = image.dataset.thumbPath;
-            previewImage.src = `/img/crop_${thumb_path}?t=${Date.now()}`;
-            previewImage.alt = image.alt;
-            previewImage.style.display = 'block';
+            const thumb_path = galleryImg.dataset.thumbPath;
+            const imgUrl = `/img/crop_${thumb_path}?t=${Date.now()}`;
+
+            // Load the image and draw it on the canvas
+            const img = new Image();
+            img.onload = function () {
+                drawImageContain(previewCtx, img, previewCanvas.width, previewCanvas.height);
+            };
+            img.src = imgUrl;
+
             previewStatus.textContent = `Showing screensaver: ${screensaverName}`;
         } else {
-            previewImage.src = '';
-            previewImage.alt = 'Screensaver not found';
-            previewImage.style.display = 'none';
             previewStatus.textContent = 'Error: Screensaver image not found in gallery.';
         }
     } else {
         // No image is displayed
-        previewImage.src = '';
-        previewImage.alt = 'No image displayed';
-        previewImage.style.display = 'none';
         previewStatus.textContent = 'No image is currently displayed.';
     }
 }
@@ -668,6 +708,7 @@ async function resetDisplay() {
 // Crop Modal Variables
 let currentCropImageId = null;
 let currentImageData = null;
+let currentImageElement = null; // Holds the Image object for the current crop preview
 let cropDragging = false;
 let cropResizing = false;
 let currentResizeHandle = null;
@@ -686,32 +727,46 @@ async function openCropModal(imageId) {
         // Get the image data from the database
         const response = await fetch('/api/current_state');
         const data = await response.json();
-        
+
         // Find the image
         currentImageData = data.images.find(img => img.id === imageId);
         if (!currentImageData) {
             throw new Error('Image not found');
         }
-        
+
+        // Show the modal
+        cropModal.classList.add('active');
+
+        setTimeout(() => {
+            cropPreviewContainer.style.width = '95%';
+            cropPreviewContainer.style.aspectRatio = '16/9';
+            cropPreviewContainer.style.height = ((cropPreviewContainer.clientWidth / 16)*9) + 'px';
+
+            // Set up event listeners for crop selection dragging
+            setupCropDragListeners();
+        }, 10);
+
         currentCropImageId = imageId;
-        
+
         // Load the image into the crop preview
-        cropPreviewImage.src = `/img/${currentImageData.path}?t=${Date.now()}`;
-        
+        const imgUrl = `/img/${currentImageData.path}?t=${Date.now()}`;
+
+        // Create a new Image object
+        currentImageElement = new Image();
+
         // Wait for image to load to get its dimensions
-        cropPreviewImage.onload = () => {
+        currentImageElement.onload = () => {
             const containerRect = cropPreviewContainer.getBoundingClientRect();
-            
+
             // Set initial crop selection based on stored values or defaults
-            if(currentImageData.crop) {
+            if (currentImageData.crop) {
                 const scale = containerRect.width / 1920;
                 cropSelectionWidth = currentImageData.crop.w * scale;
                 currentImageData.crop.h = Math.round(currentImageData.crop.w / ASPECT_RATIO);
                 cropSelectionHeight = currentImageData.crop.h * scale;
                 cropSelectionX = currentImageData.crop.x * scale;
                 cropSelectionY = currentImageData.crop.y * scale;
-            }
-            else {
+            } else {
                 // Default to full preview with 16:9 aspect ratio (1920x1080)
                 // Calculate the size to fit the container
                 cropSelectionWidth = containerRect.width;
@@ -726,10 +781,16 @@ async function openCropModal(imageId) {
             cropSelection.style.left = `${cropSelectionX}px`;
             cropSelection.style.top = `${cropSelectionY}px`;
 
+            // Draw the image on the canvas with transformations
+            drawImageContain(cropPreviewCtx, currentImageElement, cropPreviewCanvas.width, cropPreviewCanvas.height);
+
             // Apply transformations to the preview image
             applyPreviewTransformations();
         };
-        
+
+        // Set the image source to start loading
+        currentImageElement.src = imgUrl;
+
         // Set mirror checkboxes based on stored values
         if (currentImageData.mirror) {
             mirrorHCheckbox.checked = currentImageData.mirror.h;
@@ -738,19 +799,12 @@ async function openCropModal(imageId) {
             mirrorHCheckbox.checked = false;
             mirrorVCheckbox.checked = false;
         }
-        
+
         // Set rotation based on stored value
         currentRotation = currentImageData.rotate || 0;
-        
-        // Apply transformations to the preview image
-        applyPreviewTransformations();
-        
-        // Show the modal
-        cropModal.classList.add('active');
-        
-        // Set up event listeners for crop selection dragging
-        setupCropDragListeners();
-        
+
+
+
     } catch (error) {
         showAlert(`Error: ${error.message}`);
     }
@@ -758,35 +812,86 @@ async function openCropModal(imageId) {
 
 // Apply transformations to the preview image
 function applyPreviewTransformations() {
-    // Remove all transformation classes
-    cropPreviewImage.className = '';
-    
-    // Apply rotation
+    // Clear the canvas
+    cropPreviewCtx.clearRect(0, 0, cropPreviewCanvas.width, cropPreviewCanvas.height);
+
+    // If no image is loaded yet, return
+    if (!currentImageElement) return;
+
+    // Apply rotation button highlighting
     rotate_0.classList.remove('active');
     rotate_90.classList.remove('active');
     rotate_180.classList.remove('active');
     rotate_270.classList.remove('active');
+    let flip_wh = false
     if (currentRotation === 90) {
-        cropPreviewImage.classList.add('image-rotate-90');
         rotate_90.classList.add('active');
+        flip_wh = true;
     } else if (currentRotation === 180) {
-        cropPreviewImage.classList.add('image-rotate-180');
         rotate_180.classList.add('active');
     } else if (currentRotation === 270) {
-        cropPreviewImage.classList.add('image-rotate-270');
         rotate_270.classList.add('active');
-    }
-    else{
+        flip_wh = true;
+    } else {
         rotate_0.classList.add('active');
     }
-    
+
+    // Save the canvas state
+    cropPreviewCtx.save();
+
+    // Move to the center of the canvas
+    cropPreviewCtx.translate(cropPreviewCanvas.width / 2, cropPreviewCanvas.height / 2);
+
+    // Apply rotation
+    cropPreviewCtx.rotate(currentRotation * Math.PI / 180);
+
     // Apply mirroring
-    if (mirrorHCheckbox.checked) {
-        cropPreviewImage.classList.add('image-mirror-h');
+    const scaleX = mirrorHCheckbox.checked ? -1 : 1;
+    const scaleY = mirrorVCheckbox.checked ? -1 : 1;
+    cropPreviewCtx.scale(scaleX, scaleY);
+
+    // Draw the image centered
+    let drawWidth, drawHeight, offsetX, offsetY;
+
+    let imgAspect = currentImageElement.naturalWidth / currentImageElement.naturalHeight;
+    if (flip_wh) {
+        imgAspect = 1 / imgAspect;
     }
-    if (mirrorVCheckbox.checked) {
-        cropPreviewImage.classList.add('image-mirror-v');
+    const canvasAspect = cropPreviewCanvas.width / cropPreviewCanvas.height;
+    const canvasWidth = cropPreviewCanvas.width;
+    const canvasHeight = cropPreviewCanvas.height;
+
+    if (imgAspect > canvasAspect) {
+        // Image is wider than canvas (relative to height)
+        drawWidth = canvasWidth;
+        drawHeight = drawWidth / imgAspect;
+        if(flip_wh){
+            ([drawHeight, drawWidth] = [drawWidth, drawHeight]);
+        }
+        offsetX = 0;
+        offsetY = (canvasHeight - drawHeight) / 2;
+    } else {
+        // Image is taller than canvas (relative to width)
+        drawHeight = canvasHeight;
+        drawWidth = drawHeight * imgAspect;
+        if(flip_wh){
+            ([drawHeight, drawWidth] = [drawWidth, drawHeight]);
+        }
+        offsetX = (canvasWidth - drawWidth) / 2;
+        offsetY = 0;
     }
+
+
+    cropPreviewCtx.drawImage(
+        currentImageElement,
+        -drawWidth / 2,
+        -drawHeight / 2,
+        drawWidth,
+        drawHeight
+    );
+
+    // Restore the canvas state
+    cropPreviewCtx.restore();
 }
 
 // Set up event listeners for crop selection dragging and resizing
@@ -795,13 +900,13 @@ function setupCropDragListeners() {
     cropSelection.addEventListener('mousedown', (e) => {
         // Ignore if clicked on a resize handle
         if (e.target.classList.contains('resize-handle')) return;
-        
+
         cropDragging = true;
         cropStartX = e.clientX - cropSelectionX;
         cropStartY = e.clientY - cropSelectionY;
         e.preventDefault();
     });
-    
+
     // Mouse down on resize handles
     const resizeHandles = cropSelection.querySelectorAll('.resize-handle');
     resizeHandles.forEach(handle => {
@@ -814,7 +919,7 @@ function setupCropDragListeners() {
             e.stopPropagation(); // Prevent dragging from starting
         });
     });
-    
+
     // Mouse move (drag or resize)
     document.addEventListener('mousemove', (e) => {
         // Handle dragging
@@ -822,33 +927,33 @@ function setupCropDragListeners() {
             // Calculate new position
             let newX = e.clientX - cropStartX;
             let newY = e.clientY - cropStartY;
-            
+
             // Get container dimensions
             const containerRect = cropPreviewContainer.getBoundingClientRect();
-            
+
             // Constrain to container
             // newX = Math.max(0, Math.min(newX, containerRect.width - cropSelectionWidth));
             // newY = Math.max(0, Math.min(newY, containerRect.height - cropSelectionHeight));
-            
+
             // Update position
             cropSelectionX = newX;
             cropSelectionY = newY;
             cropSelection.style.left = `${newX}px`;
             cropSelection.style.top = `${newY}px`;
         }
-        
+
         // Handle resizing
         if (cropResizing) {
             const containerRect = cropPreviewContainer.getBoundingClientRect();
             const deltaX = e.clientX - cropStartX;
             const deltaY = e.clientY - cropStartY;
-            
+
             // Calculate new dimensions based on which handle is being dragged
             let newWidth = cropSelectionWidth;
             let newHeight = cropSelectionHeight;
             let newX = cropSelectionX;
             let newY = cropSelectionY;
-            
+
             // Determine resize direction and calculate new dimensions
             if (currentResizeHandle === 'top-left') {
                 // Resize from top-left corner
@@ -871,12 +976,12 @@ function setupCropDragListeners() {
                 newWidth = cropSelectionWidth + deltaX;
                 newHeight = newWidth / ASPECT_RATIO;
             }
-            
+
             // Enforce minimum size (100px width)
             if (newWidth < 50) {
                 newWidth = 50;
                 newHeight = newWidth / ASPECT_RATIO;
-                
+
                 // Adjust position if resizing from left or top
                 if (currentResizeHandle.includes('left')) {
                     newX = cropSelectionX + cropSelectionWidth - newWidth;
@@ -891,25 +996,25 @@ function setupCropDragListeners() {
             cropSelectionHeight = newHeight;
             cropSelectionX = newX;
             cropSelectionY = newY;
-            
+
             cropSelection.style.width = `${newWidth}px`;
             cropSelection.style.height = `${newHeight}px`;
             cropSelection.style.left = `${newX}px`;
             cropSelection.style.top = `${newY}px`;
-            
+
             // Update start position for next move
             cropStartX = e.clientX;
             cropStartY = e.clientY;
         }
     });
-    
+
     // Mouse up (end drag or resize)
     document.addEventListener('mouseup', () => {
         cropDragging = false;
         cropResizing = false;
         currentResizeHandle = null;
     });
-    
+
     // Rotation buttons
     rotate_0.addEventListener('click', () => {
         currentRotation = 0;
@@ -931,30 +1036,63 @@ function setupCropDragListeners() {
     // Mirror checkboxes
     mirrorHCheckbox.addEventListener('change', applyPreviewTransformations);
     mirrorVCheckbox.addEventListener('change', applyPreviewTransformations);
-    
+
     // Reset crop button
     const resetCropBtn = document.getElementById('reset-crop-btn');
     const centerCropBtn = document.getElementById('set-center-btn');
+    const centerHCropBtn = document.getElementById('set-center-h-btn');
+    const centerVCropBtn = document.getElementById('set-center-v-btn');
     const fillCropBtn = document.getElementById('crop-fill-btn');
 
     fillCropBtn.addEventListener('click', () => {
         const containerRect = cropPreviewContainer.getBoundingClientRect();
-        const imageRect = cropPreviewImage.getBoundingClientRect();
-        cropSelectionWidth = imageRect.width;
+
+        // Use the canvas dimensions instead of image rect
+        const canvasRect = cropPreviewCanvas.getBoundingClientRect();
+
+        // Calculate the dimensions of the image as drawn on the canvas
+        const flip_wh = currentRotation === 90 || currentRotation === 270;
+        const imgWidth = flip_wh ? currentImageElement.height : currentImageElement.width;
+        const imgHeight = flip_wh ? currentImageElement.width : currentImageElement.height;
+        let imgAspect = imgWidth / imgHeight;
+        const canvasAspect = canvasRect.width / canvasRect.height;
+
+        let drawWidth, drawHeight;
+
+        if (imgAspect > canvasAspect) {
+            // Image is wider than canvas (relative to height)
+            drawWidth = canvasRect.width;
+            drawHeight = drawWidth / imgAspect;
+        } else {
+            // Image is taller than canvas (relative to width)
+            drawHeight = canvasRect.height;
+            drawWidth = drawHeight * imgAspect;
+        }
+
+        // Set crop selection to match the image size with 16:9 aspect ratio
+        cropSelectionWidth = drawWidth;
         cropSelectionHeight = cropSelectionWidth / ASPECT_RATIO;
-        if (cropSelectionHeight > imageRect.height) {
-            cropSelectionHeight = imageRect.height;
+        if (cropSelectionHeight > drawHeight) {
+            cropSelectionHeight = drawHeight;
             cropSelectionWidth = cropSelectionHeight * ASPECT_RATIO;
+        }
+        if (cropSelectionWidth > drawWidth) {
+            cropSelectionWidth = drawWidth;
+            cropSelectionHeight = cropSelectionWidth / ASPECT_RATIO;
         }
 
         cropSelectionX = (containerRect.width - cropSelectionWidth) / 2;
         cropSelectionY = (containerRect.height - cropSelectionHeight) / 2;
 
+        console.log('current image size', currentImageElement.width, currentImageElement.height);
+        console.log('canvas size', canvasRect.width, canvasRect.height);
+        console.log('draw image size', drawWidth, drawHeight);
+        console.log('crop selection for contain', cropSelectionX, cropSelectionY, cropSelectionWidth, cropSelectionHeight);
+
         cropSelection.style.left = `${cropSelectionX}px`;
         cropSelection.style.top = `${cropSelectionY}px`;
         cropSelection.style.width = `${cropSelectionWidth}px`;
         cropSelection.style.height = `${cropSelectionHeight}px`;
-
     })
 
     centerCropBtn.addEventListener('click', () => {
@@ -967,23 +1105,39 @@ function setupCropDragListeners() {
         cropSelection.style.top = `${cropSelectionY}px`;
     });
 
+    centerHCropBtn.addEventListener('click', () => {
+        const containerRect = cropPreviewContainer.getBoundingClientRect();
+        // Center the crop selection
+        cropSelectionX = (containerRect.width - cropSelectionWidth) / 2;
+
+        cropSelection.style.left = `${cropSelectionX}px`;
+    });
+
+    centerVCropBtn.addEventListener('click', () => {
+        const containerRect = cropPreviewContainer.getBoundingClientRect();
+        // Center the crop selection
+        cropSelectionY = (containerRect.height - cropSelectionHeight) / 2;
+
+        cropSelection.style.top = `${cropSelectionY}px`;
+    });
+
     resetCropBtn.addEventListener('click', () => {
         // Get container dimensions
         const containerRect = cropPreviewContainer.getBoundingClientRect();
         cropSelectionWidth = containerRect.width;
         cropSelectionHeight = containerRect.height;
-        
+
         // Center the crop selection
         cropSelectionX = 0;
         cropSelectionY = 0;
-        
+
         // Update the crop selection element
         cropSelection.style.width = `${cropSelectionWidth}px`;
         cropSelection.style.height = `${cropSelectionHeight}px`;
         cropSelection.style.left = `${cropSelectionX}px`;
         cropSelection.style.top = `${cropSelectionY}px`;
     });
-    
+
     // Cancel button
     cropCancelBtn.addEventListener('click', () => {
         cropModal.classList.remove('active');
@@ -991,7 +1145,7 @@ function setupCropDragListeners() {
         document.removeEventListener('mousemove', null);
         document.removeEventListener('mouseup', null);
     });
-    
+
     // Apply button
     cropApplyBtn.addEventListener('click', saveCropSettings);
 }
@@ -1004,7 +1158,7 @@ async function saveCropSettings() {
         const cropWidth = 1920 * (cropSelectionWidth / containerRect.width);
         const x = 1920 * (cropSelectionX / containerRect.width);
         const y = 1080 * (cropSelectionY / containerRect.height);
-        
+
         // Prepare transformation data
         const transformData = {
             rotate: currentRotation,
@@ -1018,7 +1172,7 @@ async function saveCropSettings() {
                 y: Math.round(y)
             }
         };
-        
+
         // Send to server
         const response = await fetch(`/api/images/${currentCropImageId}/transform`, {
             method: 'POST',
@@ -1027,15 +1181,15 @@ async function saveCropSettings() {
             },
             body: JSON.stringify(transformData)
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to save transformation settings');
         }
-        
+
         // Close modal and refresh
         cropModal.classList.remove('active');
         fetchCurrentState();
-        
+
     } catch (error) {
         showAlert(`Error: ${error.message}`);
     }

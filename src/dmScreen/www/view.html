@@ -25,60 +25,12 @@
         .fullscreen-image {
             width: 100vw;
             height: 100vh;
-            object-fit: contain;
-        }
-        /* Transformation classes */
-        .image-rotate-90 {
-            transform: rotate(90deg);
-        }
-        .image-rotate-180 {
-            transform: rotate(180deg);
-        }
-        .image-rotate-270 {
-            transform: rotate(-90deg);
-        }
-        .image-mirror-h {
-            transform: scaleX(-1);
-        }
-        .image-mirror-v {
-            transform: scaleY(-1);
-        }
-        /* Combined transformations */
-        .image-rotate-90.image-mirror-h {
-            transform: rotate(90deg) scaleX(-1);
-        }
-        .image-rotate-90.image-mirror-v {
-            transform: rotate(90deg) scaleY(-1);
-        }
-        .image-rotate-180.image-mirror-h {
-            transform: rotate(180deg) scaleX(-1);
-        }
-        .image-rotate-180.image-mirror-v {
-            transform: rotate(180deg) scaleY(-1);
-        }
-        .image-rotate-270.image-mirror-h {
-            transform: rotate(-90deg) scaleX(-1);
-        }
-        .image-rotate-270.image-mirror-v {
-            transform: rotate(-90deg) scaleY(-1);
-        }
-        .image-mirror-h.image-mirror-v {
-            transform: scale(-1, -1);
-        }
-        .image-rotate-90.image-mirror-h.image-mirror-v {
-            transform: rotate(90deg) scale(-1, -1);
-        }
-        .image-rotate-180.image-mirror-h.image-mirror-v {
-            transform: rotate(180deg) scale(-1, -1);
-        }
-        .image-rotate-270.image-mirror-h.image-mirror-v {
-            transform: rotate(-90deg) scale(-1, -1);
         }
     </style>
 </head>
 <body class="view-body">
     <div id="image-container" class="fullscreen-container">
-        <img id="display-image" class="fullscreen-image" src="" alt="Display Image">
+        <canvas id="display-canvas" class="fullscreen-image"></canvas>
     </div>
     <script src="js/view.js"></script>
 </body>

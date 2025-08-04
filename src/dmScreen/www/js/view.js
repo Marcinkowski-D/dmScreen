@@ -1,6 +1,40 @@
 // DOM Elements
-const displayImage = document.getElementById('display-image');
+const displayCanvas = document.getElementById('display-canvas');
 const imageContainer = document.getElementById('image-container');
+
+// Canvas context
+const displayCtx = displayCanvas.getContext('2d');
+
+// Helper function to draw an image on canvas in "contain" mode (16:9 aspect ratio)
+function drawImageContain(ctx, img, canvasWidth, canvasHeight) {
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    
+    // Calculate dimensions to fit the image within the canvas while maintaining aspect ratio
+    const imgWidth = img.width;
+    const imgHeight = img.height;
+    const imgAspect = imgWidth / imgHeight;
+    const canvasAspect = canvasWidth / canvasHeight;
+    
+    let drawWidth, drawHeight, offsetX, offsetY;
+    
+    if (imgAspect > canvasAspect) {
+        // Image is wider than canvas (relative to height)
+        drawWidth = canvasWidth;
+        drawHeight = drawWidth / imgAspect;
+        offsetX = 0;
+        offsetY = (canvasHeight - drawHeight) / 2;
+    } else {
+        // Image is taller than canvas (relative to width)
+        drawHeight = canvasHeight;
+        drawWidth = drawHeight * imgAspect;
+        offsetX = (canvasWidth - drawWidth) / 2;
+        offsetY = 0;
+    }
+    
+    // Draw the image
+    ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+}
 
 // Add CSS for fade transitions
 const style = document.createElement('style');
@@ -24,7 +58,17 @@ style.textContent = `
 document.head.appendChild(style);
 
 // Set initial state
-displayImage.classList.add('fade-in');
+displayCanvas.classList.add('fade-in');
+
+// Set canvas size to match viewport
+function resizeCanvas() {
+    displayCanvas.width = window.innerWidth;
+    displayCanvas.height = window.innerHeight;
+}
+
+// Initial resize and add event listener for window resize
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
 // Variables
 let settings = {
@@ -161,31 +205,22 @@ function updateDisplay(forceRefresh = false) {
     }
     
     // Track if we're switching from thumbnail to full image (no fade needed)
-    const isSwitchingToFullImage = displayImage.dataset.loadingFullImage === 'true';
+    const isSwitchingToFullImage = displayCanvas.dataset.loadingFullImage === 'true';
     
     if (!isSwitchingToFullImage) {
         // Fade out the current image (unless we're just switching from thumbnail to full)
-        displayImage.classList.remove('fade-in');
-        displayImage.classList.add('fade-out');
+        displayCanvas.classList.remove('fade-in');
+        displayCanvas.classList.add('fade-out');
     } else {
         // When switching to full image, ensure we're not in fade-out state
-        displayImage.classList.remove('fade-out');
+        displayCanvas.classList.remove('fade-out');
     }
-    
-    // Function to apply transformations based on image metadata
-    const applyTransformations = (image) => {
-        // Reset all transformation classes
-        displayImage.className = 'fullscreen-image';
-        if (isSwitchingToFullImage) {
-            displayImage.classList.add('fade-in');
-        }
-    };
     
     // Function to load the image
     const loadImage = () => {
         if (imageToShow) {
-            // If image was hidden, show it first
-            displayImage.classList.remove('hidden');
+            // If canvas was hidden, show it first
+            displayCanvas.classList.remove('hidden');
             imageContainer.style.display = 'flex';
             
             // Always add timestamp to prevent caching, use a stronger timestamp for force refresh
@@ -194,21 +229,21 @@ function updateDisplay(forceRefresh = false) {
             if (!isSwitchingToFullImage) {
                 // First load the thumbnail
                 const thumbnailPath = `/img/crop_thumb_${imageToShow.path}${timestamp}`;
-                displayImage.alt = imageToShow.name;
                 
-                // Set the src to load the thumbnail
-                displayImage.src = thumbnailPath;
+                // Create a new Image object for the thumbnail
+                const thumbnailImg = new Image();
                 
-                // When the thumbnail loads, fade it in and then load the full image
-                displayImage.onload = () => {
-                    // Apply transformations
-                    applyTransformations(imageToShow);
+                // When the thumbnail loads, draw it on the canvas and fade it in
+                thumbnailImg.onload = () => {
+                    // Draw the image on the canvas
+                    drawImageContain(displayCtx, thumbnailImg, displayCanvas.width, displayCanvas.height);
                     
-                    displayImage.classList.remove('fade-out');
-                    displayImage.classList.add('fade-in');
+                    // Fade in the canvas
+                    displayCanvas.classList.remove('fade-out');
+                    displayCanvas.classList.add('fade-in');
                     
                     // Mark that we're now loading the full image
-                    displayImage.dataset.loadingFullImage = 'true';
+                    displayCanvas.dataset.loadingFullImage = 'true';
                     
                     // Reset transitioning state so the next updateDisplay call works
                     isTransitioning = false;
@@ -220,54 +255,60 @@ function updateDisplay(forceRefresh = false) {
                 };
                 
                 // Handle thumbnail load errors
-                displayImage.onerror = () => {
+                thumbnailImg.onerror = () => {
                     console.error('Failed to load thumbnail:', thumbnailPath);
                     // Fall back to loading the full image directly
-                    displayImage.dataset.loadingFullImage = 'true';
+                    displayCanvas.dataset.loadingFullImage = 'true';
                     // Reset transitioning state so the next updateDisplay call works
                     isTransitioning = false;
                     updateDisplay();
                 };
+                
+                // Start loading the thumbnail
+                thumbnailImg.src = thumbnailPath;
             } else {
                 // Now load the full-size image
                 const imagePath = `/img/crop_${imageToShow.path}${timestamp}`;
-                displayImage.alt = imageToShow.name;
                 
-                // Set the src to load the full image
-                displayImage.src = imagePath;
+                // Create a new Image object for the full image
+                const fullImg = new Image();
                 
-                // When the full image loads, complete the transition
-                displayImage.onload = () => {
-                    // Apply transformations
-                    applyTransformations(imageToShow);
+                // When the full image loads, draw it on the canvas and complete the transition
+                fullImg.onload = () => {
+                    // Draw the image on the canvas
+                    drawImageContain(displayCtx, fullImg, displayCanvas.width, displayCanvas.height);
                     
-                    displayImage.classList.remove('fade-out');
-                    displayImage.classList.add('fade-in');
+                    // Fade in the canvas
+                    displayCanvas.classList.remove('fade-out');
+                    displayCanvas.classList.add('fade-in');
                     isTransitioning = false;
                     // Clear the loading flag
-                    delete displayImage.dataset.loadingFullImage;
+                    delete displayCanvas.dataset.loadingFullImage;
                 };
                 
                 // Handle full image load errors
-                displayImage.onerror = () => {
+                fullImg.onerror = () => {
                     console.error('Failed to load image:', imagePath);
                     // Keep showing the thumbnail instead of showing nothing
-                    displayImage.classList.remove('fade-out');
-                    displayImage.classList.add('fade-in');
+                    displayCanvas.classList.remove('fade-out');
+                    displayCanvas.classList.add('fade-in');
                     isTransitioning = false;
                     // Clear the loading flag
-                    delete displayImage.dataset.loadingFullImage;
+                    delete displayCanvas.dataset.loadingFullImage;
                 };
+                
+                // Start loading the full image
+                fullImg.src = imagePath;
             }
         } else {
             // No image to display - hide the element completely
-            displayImage.classList.add('hidden');
+            displayCanvas.classList.add('hidden');
             imageContainer.style.display = 'none';
-            displayImage.src = '';
-            displayImage.alt = 'No image selected';
+            // Clear the canvas
+            displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
             isTransitioning = false;
             // Clear the loading flag
-            delete displayImage.dataset.loadingFullImage;
+            delete displayCanvas.dataset.loadingFullImage;
         }
     };
     
