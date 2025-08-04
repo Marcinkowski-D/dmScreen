@@ -251,6 +251,13 @@ textarea {
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
+.format-info {
+    display: block;
+    color: #666;
+    font-size: 0.8em;
+    margin-top: 2px;
+}
+
 /* Spinner Animation */
 .spinner {
     display: inline-block;

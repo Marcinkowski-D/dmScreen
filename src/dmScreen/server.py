@@ -16,9 +16,7 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 from PIL import Image
-import requests
 
-import importlib.metadata
 
 def get_lan_ip():
     try:
@@ -96,9 +94,6 @@ def serve_img(path):
         crop = True
         path = path[5:]
     is_thumb = path.startswith('thumb_')
-    def pr (*args, **kwargs):
-        if not is_thumb:
-            print(*args, **kwargs)
     file_path = os.path.join(UPLOAD_FOLDER, path)
     if os.path.exists(file_path) and os.path.isfile(file_path):
         # Check if this is a thumbnail request
@@ -119,14 +114,14 @@ def serve_img(path):
                         # Create thumbnail
                         img.thumbnail((250, 250))
                         
-                        # Save as interlaced PNG
-                        if file_path.lower().endswith('.png'):
-                            img.save(file_path, format="PNG", interlace=1)
+                        # Save as WebP
+                        if file_path.lower().endswith('.webp'):
+                            img.save(file_path, format="WebP", interlace=1)
                         else:
                             # Get the filename without extension
                             base_name = os.path.splitext(file_path)[0]
-                            new_file_path = f"{base_name}.png"
-                            img.save(new_file_path, format="PNG", interlace=1)
+                            new_file_path = f"{base_name}.webp"
+                            img.save(new_file_path, format="WebP", interlace=1)
                             file_path = new_file_path
                             path = os.path.basename(new_file_path)
                         
@@ -134,12 +129,18 @@ def serve_img(path):
                         db.updateImageThumbnail(original_path, path)
                 except Exception as e:
                     print(f"Error creating thumbnail on-demand: {e}")
-                    # If thumbnail creation fails, serve the original
-                    return send_from_directory(UPLOAD_FOLDER, original_path)
         # search database enty
         image_meta = next((img for img in db.get_database()['images'] if img['path'] == path or img['thumb_path'] == path), None)
 
-        if crop and image_meta.get("crop", None) is not None:
+        if crop:
+
+            crop_path = os.path.join(UPLOAD_FOLDER, 'crop_'+path)
+            if os.path.exists(crop_path) and os.path.isfile(crop_path):
+                response = send_from_directory(directory=UPLOAD_FOLDER, path='crop_'+path)
+                response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+                return response
 
             img = Image.open(os.path.join(UPLOAD_FOLDER, path))
 
@@ -160,26 +161,18 @@ def serve_img(path):
                     img = img.rotate(-90, expand=True)
 
             screen_size = (1920, 1080)
-            pr("screen size", screen_size)
             crop_data = image_meta['crop']
             img_size = img.size
-            pr("img_size", img_size)
             img_pos = [0, 0]
             t_size = [0, 0]
             scale = 1
             if img_size[0] / img_size[1] < 16/9:
-                pr('mode 1')
-                pr("size", img_size)
                 scale = screen_size[1] / img_size[1]
-                pr("scale", scale)
                 tw = img_size[0] * scale
                 th = screen_size[1]
                 t_size = [tw, th]
-                pr("scaled size", t_size)
                 img_pos[0] = int((screen_size[0] - tw) / 2)
-                pr("img pos", img_pos)
             else:
-                pr('mode 2')
                 scale = screen_size[0] / img_size[0]
                 th = img_size[1] * scale
                 tw = screen_size[0]
@@ -190,9 +183,6 @@ def serve_img(path):
             c_y = crop_data.get("y")
             c_w = crop_data.get("w")
             c_h = int(c_w / 16 * 9)
-
-            pr(c_x, c_y, c_w, c_h)
-            pr(img_pos, t_size)
 
             x1 = max(img_pos[0], c_x) - img_pos[0]
             y1 = max(img_pos[1], c_y) - img_pos[1]
@@ -205,19 +195,27 @@ def serve_img(path):
             x2 /= scale
 
             img = img.crop((x1, y1, x2, y2))
-
-            img_io = BytesIO()
-            img.save(img_io, 'PNG')
-            img_io.seek(0)
-
-            response = send_file(
-                img_io,
-                mimetype='image/png',
-                as_attachment=False
-            )
         else:
             # Create a response with cache control headers to prevent caching
-            response = send_from_directory(UPLOAD_FOLDER, path)
+            img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+
+
+        if img.size[0] > 1920:
+            h = int(1920 / (img.size[0]/img.size[1]))
+            img = img.resize((1920, h))
+        if img.size[1] > 1080:
+            w = int(1080 * (img.size[0]/img.size[1]))
+            img = img.resize((w, 1080))
+
+        img_io = BytesIO()
+        img.save(img_io, 'WebP', interlace=1)
+        img_io.seek(0)
+
+        response = send_file(
+            img_io,
+            mimetype='image/webp',
+            as_attachment=False
+        )
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -268,6 +266,7 @@ def upload_image():
     names = request.form.getlist('names[]') if 'names[]' in request.form else []
     
     for i, file in enumerate(files):
+        print('processing file', file.filename)
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
             # Add timestamp to filename to avoid conflicts
@@ -275,47 +274,23 @@ def upload_image():
             filename = f"{timestamp}_{filename}"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
-            
-            # Process image - resize if needed and convert to interlaced PNG
+
             try:
                 with Image.open(filepath) as img:
-                    width, height = img.size
-                    # Determine if resizing is needed
-                    needs_resize = width > 1920 or height > 1920
-                    
-                    if needs_resize:
-                        # Calculate new dimensions while maintaining aspect ratio
-                        if width > height:
-                            new_width = 1920
-                            new_height = int(height * (1920 / width))
-                        else:
-                            new_height = 1920
-                            new_width = int(width * (1920 / height))
-                        
-                        # Resize the image
-                        processed_img = img.resize((new_width, new_height), Image.LANCZOS)
-                    else:
-                        # Use original image if no resizing needed
-                        processed_img = img.copy()
-                    
-                    # Save as interlaced PNG (3 levels of interlacing)
-                    # Convert to PNG if not already
-                    if filepath.lower().endswith('.png'):
-                        processed_img.save(filepath, format="PNG", interlace=True)
+                    processed_img = img.copy()
+                    if filepath.lower().endswith('.webp'):
+                        processed_img.save(filepath, format="WebP")
                     else:
                         # Get the filename without extension
                         base_name = os.path.splitext(filepath)[0]
-                        new_filepath = f"{base_name}.png"
-                        processed_img.save(new_filepath, format="PNG", interlace=True)
+                        new_filepath = f"{base_name}.webp"
+                        processed_img.save(new_filepath, format="WebP")
                         # Update the filepath and filename
                         os.remove(filepath)  # Remove the original file
                         filepath = new_filepath
                         filename = os.path.basename(new_filepath)
-                    
-                    if needs_resize:
-                        print(f"Resized and saved image {filename} as interlaced PNG ({new_width}x{new_height})")
-                    else:
-                        print(f"Saved image {filename} as interlaced PNG")
+
+                    print(f"Saved image {filename} as WebP")
             except Exception as e:
                 print(f"Error processing image: {e}")
             
@@ -327,17 +302,15 @@ def upload_image():
                 with Image.open(filepath) as img:
                     # Calculate new dimensions while maintaining aspect ratio
                     img.thumbnail((250, 250))
-                    
-                    # Save the thumbnail as interlaced PNG, preserving transparency if present
-                    if thumb_filepath.lower().endswith('.png'):
-                        img.save(thumb_filepath, format="PNG", interlace=1)
+
+                    if thumb_filepath.lower().endswith('.webp'):
+                        img.save(thumb_filepath, format="WebP")
                     else:
                         # Get the filename without extension
                         base_name = os.path.splitext(thumb_filepath)[0]
-                        new_thumb_filepath = f"{base_name}.png"
-                        img.save(new_thumb_filepath, format="PNG", interlace=1)
+                        new_thumb_filepath = f"{base_name}.webp"
+                        img.save(new_thumb_filepath, format="WebP")
                         # Update the thumbnail filepath and filename
-                        thumb_filepath = new_thumb_filepath
                         thumb_filename = os.path.basename(new_thumb_filepath)
             except Exception as e:
                 print(f"Error creating thumbnail: {e}")
@@ -412,7 +385,7 @@ def transform_image(image_id):
             return jsonify({'error': 'No transformation data provided'}), 400
 
         # Use the updateImageTransform method to update all provided transformation data
-        result = db.updateImageTransform(image_id, transform_data)
+        result = db.updateImageTransform(image_id, transform_data, UPLOAD_FOLDER)
         update_timestamp()
         
         # Check if there was an error
@@ -518,8 +491,8 @@ def main():
     # Start the server
     lan_ip = get_lan_ip()
     print('running server on port 5000')
-    print(f'Local admin URL: http://127.0.0.1:5000/admin')
-    print(f'Local view URL: http://127.0.0.1:5000/view')
+    print('Local admin URL: http://127.0.0.1:5000/admin')
+    print('Local view URL: http://127.0.0.1:5000/view')
     print(f'Network admin URL: http://{lan_ip}:5000/admin')
     print(f'Network view URL: http://{lan_ip}:5000/view')
     print('server listening...')

@@ -2,7 +2,6 @@
 import os
 import json
 
-from PIL import Image
 
 from flask import jsonify
 
@@ -17,7 +16,7 @@ DEFAULT_DATABASE = {
 # Default values for image transformation properties
 DEFAULT_ROTATE = 0
 DEFAULT_MIRROR = {"h": False, "v": False}
-DEFAULT_CROP = None  # Will be calculated based on image dimensions
+DEFAULT_CROP = {"w": 1920, "x": 0, "y": 0}
 db_file = None
 
 class Database:
@@ -74,7 +73,7 @@ class Database:
         self.save_database(db)
         return image
 
-    def updateImageTransform(self, image_id, transform_data):
+    def updateImageTransform(self, image_id, transform_data, UPLOAD_FOLDER):
         """
         Update image transformation metadata (rotate, mirror, crop)
         
@@ -129,6 +128,14 @@ class Database:
                 
         # Save the updated database
         self.save_database(db)
+        try:
+            os.remove(os.path.join(UPLOAD_FOLDER, 'crop_'+image['path']))
+        except OSError:
+            pass  # File might not exist
+        try:
+            os.remove(os.path.join(UPLOAD_FOLDER, 'crop_'+image['thumb_path']))
+        except OSError:
+            pass  # File might not exist
         return image
         
     # Keep the old method for backward compatibility, but make it use the new approach

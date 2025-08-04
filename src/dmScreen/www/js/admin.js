@@ -259,48 +259,142 @@ function hideBackdrop() {
     backdrop.classList.remove('active');
 }
 
-// Form submissions
+// WebP Konvertierungsfunktionen
+function convertImageToWebP(file, quality = 0.8) {
+    return new Promise((resolve, reject) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.onload = function() {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            
+            // Konvertierung zu WebP
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    // Erstelle eine neue Datei mit WebP-Format
+                    const webpFile = new File([blob], file.name.replace(/\.[^/.]+$/, '.webp'), {
+                        type: 'image/webp',
+                        lastModified: Date.now()
+                    });
+                    resolve(webpFile);
+                } else {
+                    reject(new Error('WebP-Konvertierung fehlgeschlagen'));
+                }
+            }, 'image/webp', quality);
+        };
+        
+        img.onerror = () => reject(new Error('Fehler beim Laden des Bildes'));
+        img.src = URL.createObjectURL(file);
+    });
+}
+
+// Überprüfe WebP-Unterstützung des Browsers
+function checkWebPSupport() {
+    return new Promise((resolve) => {
+        const webP = new Image();
+        webP.onload = webP.onerror = function () {
+            resolve(webP.height === 2);
+        };
+        webP.src = 'data:image/webp;base64,UklGRjoAAABXRUJQVlA4IC4AAACyAgCdASoCAAIALmk0mk0iIiIiIgBoSygABc6WWgAA/veff/0PP8bA//LwYAAA';
+    });
+}
+
+// Batch-Konvertierung mehrerer Bilder
+async function convertImagesToWebP(files, quality = 0.8, onProgress = null) {
+    const supportedFormats = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'];
+    const convertedFiles = [];
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        if (onProgress) {
+            onProgress(i + 1, files.length, file.name);
+        }
+        
+        try {
+            if (supportedFormats.includes(file.type) && file.type !== 'image/webp') {
+                console.log(`Konvertiere ${file.name} zu WebP...`);
+                const webpFile = await convertImageToWebP(file, quality);
+                convertedFiles.push(webpFile);
+            } else if (file.type === 'image/webp') {
+                // Bereits WebP, keine Konvertierung nötig
+                convertedFiles.push(file);
+            } else {
+                // Nicht unterstütztes Format, original beibehalten
+                console.warn(`Format ${file.type} wird nicht für WebP-Konvertierung unterstützt`);
+                convertedFiles.push(file);
+            }
+        } catch (error) {
+            console.error(`Fehler bei der Konvertierung von ${file.name}:`, error);
+            // Bei Fehler das Original verwenden
+            convertedFiles.push(file);
+        }
+    }
+    
+    return convertedFiles;
+}
+
+// Modifizierte Upload-Funktion mit WebP-Konvertierung
 uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
     // Get all visible rows in the preview table
     const rows = imagePreviewList.querySelectorAll('tr');
     if (rows.length === 0) {
-        showAlert('Please select at least one image to upload');
+        showAlert('Bitte wählen Sie mindestens ein Bild zum Upload aus');
         return;
     }
 
-    showBackdrop('Uploading images...');
+    // WebP-Unterstützung prüfen
+    const supportsWebP = await checkWebPSupport();
+    if (!supportsWebP) {
+        console.warn('Browser unterstützt WebP nicht vollständig, verwende Originalformate');
+    }
+
+    showBackdrop('Konvertiere Bilder zu WebP...');
 
     imagePreviewContainer.style.display = 'none';
     imagePreviewList.innerHTML = '';
-    // Disable upload button and show loading spinner
     uploadButton.disabled = true;
-    uploadButton.innerHTML = '<span class="spinner"></span> Uploading...';
-
-    const formData = new FormData();
-    const files = imageFilesInput.files;
-
-    // Add each file and its name to the form data
-    rows.forEach(row => {
-        const index = parseInt(row.dataset.index);
-        const file = files[index];
-        const nameInput = row.querySelector('.image-name-input');
-        // Use the input value or extract filename without extension as fallback
-        const name = nameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
-
-        formData.append('files[]', file);
-        formData.append('names[]', name);
-    });
+    uploadButton.innerHTML = '<span class="spinner"></span> Konvertiere und lade hoch...';
 
     try {
+        const files = Array.from(imageFilesInput.files);
+        
+        // Konvertiere Bilder zu WebP (falls unterstützt)
+        let convertedFiles = files;
+        if (supportsWebP) {
+            convertedFiles = await convertImagesToWebP(files, 0.8, (current, total, fileName) => {
+                showBackdrop(`Konvertiere Bild ${current}/${total}: ${fileName}`);
+            });
+        }
+
+        showBackdrop('Lade Bilder hoch...');
+
+        const formData = new FormData();
+
+        // Add each converted file and its name to the form data
+        rows.forEach((row, index) => {
+            const rowIndex = parseInt(row.dataset.index);
+            const file = convertedFiles[rowIndex];
+            const nameInput = row.querySelector('.image-name-input');
+            // Use the input value or extract filename without extension as fallback
+            const name = nameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+
+            formData.append('files[]', file);
+            formData.append('names[]', name);
+        });
+
         const response = await fetch('/api/images', {
             method: 'POST',
             body: formData
         });
 
         if (!response.ok) {
-            throw new Error('Failed to upload images');
+            throw new Error('Fehler beim Upload der Bilder');
         }
 
         // Reset form and preview
@@ -308,24 +402,162 @@ uploadForm.addEventListener('submit', async (e) => {
         imagePreviewContainer.style.display = 'none';
         imagePreviewList.innerHTML = '';
         uploadButton.disabled = true;
-        // Reset button text
-        uploadButton.innerHTML = 'Upload Selected Images';
+        uploadButton.innerHTML = 'Ausgewählte Bilder hochladen';
 
         hideBackdrop();
 
-        showAlert('Images uploaded successfully', 'Success');
+        const savedBytes = calculateSavedBytes(files, convertedFiles);
+        showAlert('Bilder erfolgreich hochgeladen!', 'Erfolg');
+
         fetchCurrentState();
 
     } catch (error) {
-        // Reset button state on error
         uploadButton.disabled = false;
-        uploadButton.innerHTML = 'Upload Selected Images';
-
+        uploadButton.innerHTML = 'Ausgewählte Bilder hochladen';
         hideBackdrop();
-
-        showAlert(`${error.message}`, 'Error');
+        showAlert(`Fehler: ${error.message}`, 'Fehler');
     }
 });
+
+// Hilfsfunktionen
+function calculateSavedBytes(originalFiles, convertedFiles) {
+    let originalSize = 0;
+    let convertedSize = 0;
+    
+    for (let i = 0; i < originalFiles.length; i++) {
+        originalSize += originalFiles[i].size;
+        convertedSize += convertedFiles[i].size;
+    }
+    
+    return Math.max(0, originalSize - convertedSize);
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Erweiterte handleFileSelection-Funktion mit WebP-Vorschau
+function handleFileSelection(e) {
+    const files = e.target.files;
+
+    if (files.length === 0) {
+        imagePreviewContainer.style.display = 'none';
+        uploadButton.disabled = true;
+        return;
+    }
+
+    // Clear previous previews
+    imagePreviewList.innerHTML = '';
+
+    // Show preview container
+    imagePreviewContainer.style.display = 'block';
+    uploadButton.disabled = false;
+
+    // Add each file to the preview
+    Array.from(files).forEach((file, index) => {
+        // Create a preview row
+        const row = document.createElement('tr');
+        row.dataset.index = index;
+
+        // Get file name without extension for default name
+        const fileName = file.name.replace(/\.[^/.]+$/, "");
+
+        // Create a URL for the image preview
+        const imageUrl = URL.createObjectURL(file);
+
+        // Bestimme ob das Bild zu WebP konvertiert wird
+        const willConvert = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'].includes(file.type);
+        const formatInfo = willConvert ? ' (wird zu WebP konvertiert)' : '';
+
+        row.innerHTML = `
+            <td><img src="${imageUrl}" alt="${file.name}" class="preview-image"></td>
+            <td>
+                <input type="text" class="image-name-input" value="${fileName}" data-index="${index}">
+                <small class="format-info">${formatBytes(file.size)}${formatInfo}</small>
+            </td>
+            <td class="image-preview-actions">
+                <button type="button" class="icon-btn remove-image-btn" data-index="${index}">🚮</button>
+            </td>
+        `;
+
+        imagePreviewList.appendChild(row);
+
+        // Add event listener for remove button
+        row.querySelector('.remove-image-btn').addEventListener('click', () => removeImagePreview(index));
+    });
+}
+
+// Form submissions
+//uploadForm.addEventListener('submit', async (e) => {
+//    e.preventDefault();
+//
+//    // Get all visible rows in the preview table
+//    const rows = imagePreviewList.querySelectorAll('tr');
+//    if (rows.length === 0) {
+//        showAlert('Please select at least one image to upload');
+//        return;
+//    }
+//
+//    showBackdrop('Uploading images...');
+//
+//    imagePreviewContainer.style.display = 'none';
+//    imagePreviewList.innerHTML = '';
+//    // Disable upload button and show loading spinner
+//    uploadButton.disabled = true;
+//    uploadButton.innerHTML = '<span class="spinner"></span> Uploading...';
+//
+//    const formData = new FormData();
+//    const files = imageFilesInput.files;
+//
+//    // Add each file and its name to the form data
+//    rows.forEach(row => {
+//        const index = parseInt(row.dataset.index);
+//        const file = files[index];
+//        const nameInput = row.querySelector('.image-name-input');
+//        // Use the input value or extract filename without extension as fallback
+//        const name = nameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+//
+//        formData.append('files[]', file);
+//        formData.append('names[]', name);
+//    });
+//
+//    try {
+//        const response = await fetch('/api/images', {
+//            method: 'POST',
+//            body: formData
+//        });
+//
+//        if (!response.ok) {
+//            throw new Error('Failed to upload images');
+//        }
+//
+//        // Reset form and preview
+//        uploadForm.reset();
+//        imagePreviewContainer.style.display = 'none';
+//        imagePreviewList.innerHTML = '';
+//        uploadButton.disabled = true;
+//        // Reset button text
+//        uploadButton.innerHTML = 'Upload Selected Images';
+//
+//        hideBackdrop();
+//
+//        showAlert('Images uploaded successfully', 'Success');
+//        fetchCurrentState();
+//
+//    } catch (error) {
+//        // Reset button state on error
+//        uploadButton.disabled = false;
+//        uploadButton.innerHTML = 'Upload Selected Images';
+//
+//        hideBackdrop();
+//
+//        showAlert(`${error.message}`, 'Error');
+//    }
+//});
 
 saveSettingsBtn.addEventListener('click', async () => {
     const settings = {
@@ -598,8 +830,8 @@ function updatePreview(settings) {
         const galleryImg = document.querySelector(`#image-${settings.current_image} img`);
         if (galleryImg) {
             // Use the original image path for the preview
-            const thumb_path = galleryImg.dataset.thumbPath;
-            const imgUrl = `/img/crop_${thumb_path}?t=${Date.now()}`;
+            const path = galleryImg.dataset.originalPath;
+            const imgUrl = `/img/crop_${path}?t=${Date.now()}`;
 
             // Load the image and draw it on the canvas
             const img = new Image();
@@ -621,8 +853,8 @@ function updatePreview(settings) {
         const galleryImg = document.querySelector(`#image-${settings.screensaver} img`);
         if (galleryImg) {
             // Use the original image path for the preview
-            const thumb_path = galleryImg.dataset.thumbPath;
-            const imgUrl = `/img/crop_${thumb_path}?t=${Date.now()}`;
+            const path = galleryImg.dataset.originalPath;
+            const imgUrl = `/img/crop_${path}?t=${Date.now()}`;
 
             // Load the image and draw it on the canvas
             const img = new Image();
