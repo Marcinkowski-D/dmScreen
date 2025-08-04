@@ -21,6 +21,14 @@ from flask import (
 from werkzeug.utils import secure_filename
 from PIL import Image
 
+# Import the background caching system
+from dmScreen.cache_worker import (
+    init_cache_system,
+    shutdown_cache_system,
+    queue_image_for_caching,
+    is_image_cached
+)
+
 
 def get_lan_ip():
     try:
@@ -215,6 +223,16 @@ def serve_img(path):
         if os.path.exists(cache_path) and os.path.isfile(cache_path):
             # Use cached image
             print(f"Using cached image: {cache_path}")
+            
+            # If this is a width-specific request, trigger background caching of other images
+            if w is not None and not is_thumb:
+                # Start background caching for other images with the same width
+                threading.Thread(
+                    target=queue_image_for_caching,
+                    args=(path, w, crop, db, UPLOAD_FOLDER),
+                    daemon=True
+                ).start()
+            
             response = send_file(
                 cache_path,
                 mimetype='image/webp',
@@ -322,6 +340,15 @@ def serve_img(path):
 
         # Save to cache
         img.save(cache_path, format="WebP", quality=85)
+        
+        # If this is a width-specific request, trigger background caching of other images
+        if w is not None and not is_thumb and not crop:
+            # Start background caching for other images with the same width
+            threading.Thread(
+                target=queue_image_for_caching,
+                args=(path, w, crop, db, UPLOAD_FOLDER),
+                daemon=True
+            ).start()
         
         # Return the image
         response = send_file(
@@ -774,6 +801,18 @@ def get_image_url(image_id):
     url = f"{base_url}?t={int(time.time())}"
     if w:
         url += f"&w={w}"
+        
+        # If this is a width-specific request and not a thumbnail, check if we should trigger background caching
+        if not thumb and not crop and w.isdigit():
+            w_int = int(w)
+            # Check if the image is already cached
+            if not is_image_cached(path, w_int, crop, CACHE_FOLDER):
+                # Start background caching for other images with the same width
+                threading.Thread(
+                    target=queue_image_for_caching,
+                    args=(path, w_int, crop, db, UPLOAD_FOLDER),
+                    daemon=True
+                ).start()
     
     return jsonify({
         'url': url,
@@ -785,6 +824,10 @@ def main():
     # Initialize database
     print('initializing database')
     db = Database(DATABASE_FILE)
+
+    # Initialize background caching system
+    print('initializing background caching system')
+    init_cache_system(CACHE_FOLDER, UPLOAD_FOLDER)
 
     # Register WiFi routes
     register_wifi_routes(app)
@@ -800,15 +843,20 @@ def main():
     else:
         print('not linux!')
     
-    # Start the server
-    lan_ip = get_lan_ip()
-    print('running server on port 5000')
-    print('Local admin URL: http://127.0.0.1:5000/admin')
-    print('Local view URL: http://127.0.0.1:5000/view')
-    print(f'Network admin URL: http://{lan_ip}:5000/admin')
-    print(f'Network view URL: http://{lan_ip}:5000/view')
-    print('server listening...')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    try:
+        # Start the server
+        lan_ip = get_lan_ip()
+        print('running server on port 5000')
+        print('Local admin URL: http://127.0.0.1:5000/admin')
+        print('Local view URL: http://127.0.0.1:5000/view')
+        print(f'Network admin URL: http://{lan_ip}:5000/admin')
+        print(f'Network view URL: http://{lan_ip}:5000/view')
+        print('server listening...')
+        app.run(host='0.0.0.0', port=5000, debug=True)
+    finally:
+        # Shutdown background caching system when server stops
+        print('shutting down background caching system')
+        shutdown_cache_system()
 
 if __name__ == "__main__":
     main()

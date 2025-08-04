@@ -91,8 +91,13 @@ The DM Screen employs a powerful caching system to dramatically improve image lo
 4. Old cache files (older than 24 hours) are automatically removed
 5. If the cache exceeds 500MB, the oldest files are removed first
 6. Cache is automatically invalidated when an image is transformed (rotated, mirrored, or cropped)
+7. Background caching automatically pre-caches related images when one is requested:
+   - When an image is requested with a specific width parameter, the system starts background threads
+   - Images in the same folder as the requested image are cached first
+   - Then other images are cached with the same width parameter
+   - A maximum of 3 images are processed simultaneously to avoid overloading the system
 
-This caching system reduces image loading times from ~3 seconds to near-instant on Raspberry Pi devices while ensuring users always see the most up-to-date version of images.
+This caching system reduces image loading times from ~3 seconds to near-instant on Raspberry Pi devices while ensuring users always see the most up-to-date version of images. The background caching feature further improves the user experience by proactively caching images that are likely to be viewed next.
 
 ### Network Configuration
 
