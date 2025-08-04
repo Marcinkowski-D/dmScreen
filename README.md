@@ -90,8 +90,9 @@ The DM Screen employs a powerful caching system to dramatically improve image lo
 3. The cache is automatically cleaned up periodically to prevent excessive disk usage
 4. Old cache files (older than 24 hours) are automatically removed
 5. If the cache exceeds 500MB, the oldest files are removed first
+6. Cache is automatically invalidated when an image is transformed (rotated, mirrored, or cropped)
 
-This caching system reduces image loading times from ~3 seconds to near-instant on Raspberry Pi devices.
+This caching system reduces image loading times from ~3 seconds to near-instant on Raspberry Pi devices while ensuring users always see the most up-to-date version of images.
 
 ### Network Configuration
 
