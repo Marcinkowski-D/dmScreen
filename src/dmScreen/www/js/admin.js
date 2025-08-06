@@ -1527,8 +1527,8 @@ async function updatePreview(settings) {
 
     if (settings.current_image) {
         try {
-            // Fetch the image URL from the server
-            const response = await fetch(`/api/image/${settings.current_image}/url?w=${w}`);
+            // Fetch the image URL from the server with cache-busting timestamp
+            const response = await fetch(`/api/image/${settings.current_image}/url?w=${w}&t=${Date.now()}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch image URL');
             }
@@ -1555,8 +1555,8 @@ async function updatePreview(settings) {
             const screensaverOption = Array.from(screensaverSelect.options).find(opt => opt.value === settings.screensaver);
             const screensaverName = screensaverOption ? screensaverOption.textContent : 'Unknown';
             
-            // Fetch the image URL from the server
-            const response = await fetch(`/api/image/${settings.screensaver}/url?w=${w}`);
+            // Fetch the image URL from the server with cache-busting timestamp
+            const response = await fetch(`/api/image/${settings.screensaver}/url?w=${w}&t=${Date.now()}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch screensaver image URL');
             }

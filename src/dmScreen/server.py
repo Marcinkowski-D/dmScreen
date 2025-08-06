@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 import socket
@@ -168,9 +169,13 @@ def serve_img(path):
         path = path[5:]
     is_thumb = path.startswith('thumb_')
     file_path = os.path.join(UPLOAD_FOLDER, path)
+
+    images = db.get_database().get('images')
+    image_meta = next((img for img in images if img['path'] == path or img['thumb_path'] == path), None)
+    img_hash = hashlib.md5(json.dumps(image_meta).encode()).hexdigest()
     
     # Create a cache key based on the path and width
-    cache_key = f"{path}_{w}_{'crop' if crop else 'nocrop'}"
+    cache_key = f"{path}_{w}_{'crop' if crop else 'nocrop'}_{img_hash}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
     cache_path = os.path.join(CACHE_FOLDER, f"{cache_hash}.webp")
     
@@ -238,7 +243,9 @@ def serve_img(path):
                 mimetype='image/webp',
                 as_attachment=False
             )
-            response.headers['Cache-Control'] = 'max-age=86400'  # Cache for 24 hours
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
             return response
             
         # Check if this is a thumbnail request
@@ -356,7 +363,9 @@ def serve_img(path):
             mimetype='image/webp',
             as_attachment=False
         )
-        response.headers['Cache-Control'] = 'max-age=86400'  # Cache for 24 hours
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
         return response
     else:
         return f"File not found: {file_path}", 404
@@ -695,7 +704,21 @@ def transform_image(image_id):
         if isinstance(result, tuple) and len(result) > 1 and 'error' in result[0]:
             return jsonify(result[0]), result[1]
         
-        # Update timestamp to notify clients about changes
+        # Get the image path to trigger cache regeneration
+        db_data = db.get_database()
+        image = next((img for img in db_data['images'] if img['id'] == image_id), None)
+        
+        if image and 'path' in image:
+            # Trigger background caching for common image sizes with both crop settings
+            # This ensures all cached versions are updated after transformation
+            widths = [None, 250, 500, 1000, 1920]
+            for width in widths:
+                for crop_setting in [True, False]:
+                    threading.Thread(
+                        target=queue_image_for_caching,
+                        args=(image['path'], width, crop_setting, db, UPLOAD_FOLDER),
+                        daemon=True
+                    ).start()
         
         return jsonify({'success': True})
     except Exception as e:
@@ -782,10 +805,11 @@ def get_image_url(image_id):
     # Find the image in the database
     database = db.get_database()
     image = next((img for img in database['images'] if img['id'] == image_id), None)
-    
+
     if not image:
         return jsonify({'error': 'Image not found'}), 404
-    
+
+    img_hash = hashlib.md5(json.dumps(image).encode()).hexdigest()
     # Construct the URL
     path = image['path']
     if thumb:
@@ -806,11 +830,11 @@ def get_image_url(image_id):
         if not thumb and not crop and w.isdigit():
             w_int = int(w)
             # Check if the image is already cached
-            if not is_image_cached(path, w_int, crop, CACHE_FOLDER):
+            if not is_image_cached(path, w_int, img_hash, crop, CACHE_FOLDER):
                 # Start background caching for other images with the same width
                 threading.Thread(
                     target=queue_image_for_caching,
-                    args=(path, w_int, crop, db, UPLOAD_FOLDER),
+                    args=(path, w_int, img_hash, crop, db, UPLOAD_FOLDER),
                     daemon=True
                 ).start()
     

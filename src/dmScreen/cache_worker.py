@@ -4,7 +4,7 @@ Background caching system for dmScreen.
 This module implements a job queue and worker threads to proactively cache
 images in the background when a specific image is requested with a width parameter.
 """
-
+import json
 import os
 import time
 import threading
@@ -29,12 +29,14 @@ PRIORITY_OTHER_IMAGES = 20
 class CacheJob:
     """Represents a job to cache an image with specific parameters."""
     
-    def __init__(self, image_path: str, width: Optional[int], crop: bool, priority: int):
+    def __init__(self, image_path: str, width: Optional[int], img_hash:str, crop: bool, priority: int):
         self.image_path = image_path
         self.width = width
         self.crop = crop
         self.priority = priority
-        self.cache_key = f"{image_path}_{width}_{'crop' if crop else 'nocrop'}"
+
+        # Create a cache key based on the path and width
+        self.cache_key = f"{image_path}_{width}_{'crop' if crop else 'nocrop'}_{img_hash}"
         
     def __lt__(self, other):
         """Compare jobs based on priority for the priority queue."""
@@ -144,7 +146,7 @@ def cache_worker(cache_folder: str, upload_folder: str):
         except Exception as e:
             print(f"Error in cache worker: {e}")
 
-def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool, 
+def queue_image_for_caching(image_path: str, width: Optional[int], img_hash:str, crop: bool,
                            db, upload_folder: str):
     """
     Queue an image for background caching and also queue related images.
@@ -180,7 +182,8 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
                              if img['path'] != image_path and img.get('parent') == folder_id]
         
         for img in same_folder_images:
-            job = CacheJob(img['path'], width, crop, PRIORITY_SAME_FOLDER)
+            img_hash = hashlib.md5(json.dumps(img).encode()).hexdigest()
+            job = CacheJob(img['path'], width, img_hash, crop, PRIORITY_SAME_FOLDER)
             if job.cache_key not in cached_images:
                 cache_queue.put(job)
         
@@ -189,16 +192,17 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
                        if img['path'] != image_path and img.get('parent') != folder_id]
         
         for img in other_images:
-            job = CacheJob(img['path'], width, crop, PRIORITY_OTHER_IMAGES)
+            img_hash = hashlib.md5(json.dumps(img).encode()).hexdigest()
+            job = CacheJob(img['path'], width, img_hash, crop, PRIORITY_OTHER_IMAGES)
             if job.cache_key not in cached_images:
                 cache_queue.put(job)
                 
     except Exception as e:
         print(f"Error queueing images for caching: {e}")
 
-def is_image_cached(image_path: str, width: Optional[int], crop: bool, cache_folder: str) -> bool:
+def is_image_cached(image_path: str, width: Optional[int], img_hash:str, crop: bool, cache_folder: str) -> bool:
     """Check if an image is already cached."""
-    cache_key = f"{image_path}_{width}_{'crop' if crop else 'nocrop'}"
+    cache_key = f"{image_path}_{width}_{'crop' if crop else 'nocrop'}_{img_hash}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
     cache_path = os.path.join(cache_folder, f"{cache_hash}.webp")
     return os.path.exists(cache_path)
