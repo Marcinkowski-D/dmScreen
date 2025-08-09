@@ -6,9 +6,10 @@ import time
 import threading
 import concurrent.futures
 from datetime import datetime
-from io import BytesIO
 import hashlib
-import functools
+import dotenv
+
+dotenv.load_dotenv()
 
 from flask import (
     Flask,
@@ -47,7 +48,54 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import register_wifi_routes, start_wifi_monitor
+from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network
+
+# Global variables
+admin_connected = False  # Track if admin has connected
+last_network_change = 0  # Track when network configuration last changed
+
+def reset_admin_connection():
+    """Reset the admin_connected flag when network configuration changes"""
+    global admin_connected, last_network_change
+    admin_connected = False
+    last_network_change = time.time()
+    print("Network configuration changed, reset admin connection status")
+
+# Wrapper functions for WiFi operations that reset admin connection status
+def configure_wifi_wrapper(ssid, password):
+    """Configure WiFi and reset admin connection status"""
+    result = configure_wifi(ssid, password)
+    if result:
+        reset_admin_connection()
+    return result
+
+def create_adhoc_network_wrapper():
+    """Create ad-hoc network and reset admin connection status"""
+    result = create_adhoc_network()
+    if result:
+        reset_admin_connection()
+    return result
+
+# Modified wifi_monitor function to avoid creating multiple ad-hoc networks
+def wifi_monitor_wrapper():
+    """Background thread to monitor WiFi and prefer known networks; fallback to ad-hoc"""
+    while True:
+        try:
+            if not check_wifi_connection():
+                # Try connect to best known network first
+                if connect_best_known_network():
+                    reset_admin_connection()
+                else:
+                    # Only create ad-hoc network if it's not already active
+                    if not check_adhoc_network():
+                        create_adhoc_network_wrapper()
+        except Exception as e:
+            print(f"wifi_monitor_wrapper error: {e}")
+        time.sleep(60)  # Check every minute
+
+def start_wifi_monitor_wrapper():
+    """Start the WiFi monitoring thread with our wrapper function"""
+    threading.Thread(target=wifi_monitor_wrapper, daemon=True).start()
 
 # Configuration
 BASE_DIR = os.getcwd()
@@ -137,6 +185,11 @@ def index():
 
 @app.route('/admin')
 def admin():
+    global admin_connected
+    # Set admin_connected to True when admin page is accessed
+    admin_connected = True
+    update_timestamp()
+    
     admin_path = os.path.join(WWW_FOLDER, 'admin.html')
     if os.path.exists(admin_path):
         return send_from_directory(WWW_FOLDER, 'admin.html')
@@ -145,9 +198,20 @@ def admin():
 
 @app.route('/view')
 def view():
+    global admin_connected
     view_path = os.path.join(WWW_FOLDER, 'view.html')
+    
     if os.path.exists(view_path):
-        return send_from_directory(WWW_FOLDER, 'view.html')
+        # If admin hasn't connected, inject the IP address into the HTML
+        if not admin_connected:
+            with open(view_path, 'r') as file:
+                html_content = file.read()
+
+            # Return the modified HTML
+            return html_content
+        else:
+            # Admin has connected, serve the original file
+            return send_from_directory(WWW_FOLDER, 'view.html')
     else:
         return f"File not found: {view_path}", 404
 
@@ -381,7 +445,7 @@ def static_files(path):
 # API Endpoints
 @app.route('/api/current_state', methods=['GET'])
 def get_current_state():
-    global last_update_timestamp
+    global last_update_timestamp, admin_connected
     database = db.get_database()
     
     # Sort images alphabetically by name
@@ -394,14 +458,19 @@ def get_current_state():
         'settings': database['settings'],
         'images': images,
         'folders': folders,
-        'timestamp': last_update_timestamp
+        'timestamp': last_update_timestamp,
+        'admin_connected': admin_connected
     })
 
 @app.route('/api/updates', methods=['GET'])
 def check_updates():
-    global last_update_timestamp
+    global last_update_timestamp, admin_connected
+    # Get the server's IP address
+    ip_address = get_lan_ip()
     return jsonify({
-        'timestamp': last_update_timestamp
+        'timestamp': last_update_timestamp,
+        'admin_connected': admin_connected,
+        'ip': ip_address + ':' + os.getenv('PORT', '5000') + '/admin'
     })
 
 @app.route('/api/images', methods=['GET'])
@@ -834,7 +903,7 @@ def get_image_url(image_id):
                 # Start background caching for other images with the same width
                 threading.Thread(
                     target=queue_image_for_caching,
-                    args=(path, w_int, img_hash, crop, db, UPLOAD_FOLDER),
+                    args=(path, w_int, crop, db, UPLOAD_FOLDER),
                     daemon=True
                 ).start()
     
@@ -853,15 +922,32 @@ def main():
     print('initializing background caching system')
     init_cache_system(CACHE_FOLDER, UPLOAD_FOLDER)
 
-    # Register WiFi routes
-    register_wifi_routes(app)
+    # Register WiFi routes with on_change callback to reset admin connection
+    register_wifi_routes(app, on_change=reset_admin_connection)
+    
+    # Add custom route for WiFi configuration that resets admin connection
+    @app.route('/api/wifi/configure_reset', methods=['POST'])
+    def set_wifi_config_reset():
+        data = request.get_json()
+        ssid = data.get('ssid')
+        password = data.get('password')
+        
+        if not ssid or not password:
+            return jsonify({'error': 'SSID and password are required'}), 400
+        
+        success = configure_wifi_wrapper(ssid, password)
+        
+        return jsonify({
+            'success': success,
+            'message': 'WiFi configured successfully' if success else 'Failed to configure WiFi'
+        })
 
     print('looking if linux')
     # Start WiFi monitoring in background (only on Raspberry Pi)
     if hasattr(os, 'uname'):
         if "Raspbian" in os.uname().version:
             print('is linux!')
-            start_wifi_monitor()
+            start_wifi_monitor_wrapper()  # Use our wrapper function
         else:
             print('not Raspberry Pi!')
     else:
@@ -876,7 +962,7 @@ def main():
         print(f'Network admin URL: http://{lan_ip}:5000/admin')
         print(f'Network view URL: http://{lan_ip}:5000/view')
         print('server listening...')
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=int(os.getenv('PORT', '5000')), debug=True)
     finally:
         # Shutdown background caching system when server stops
         print('shutting down background caching system')

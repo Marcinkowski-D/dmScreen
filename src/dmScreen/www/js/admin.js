@@ -5,6 +5,10 @@ const screensaverSelect = document.getElementById('screensaver');
 const removeScreensaverBtn = document.getElementById('remove-screensaver');
 const wifiStatus = document.getElementById('wifi-status');
 const wifiForm = document.getElementById('wifi-form');
+const wifiSSIDInput = document.getElementById('wifi-ssid');
+const wifiPasswordInput = document.getElementById('wifi-password');
+const wifiScanBtn = document.getElementById('wifi-scan-btn');
+const wifiSSIDList = document.getElementById('wifi-ssid-list');
 const previewCanvas = document.getElementById('preview-canvas');
 const previewStatus = document.getElementById('preview-status');
 const resetDisplayBtn = document.getElementById('reset-display');
@@ -2220,3 +2224,39 @@ async function saveCropSettings() {
         showAlert(`Error: ${error.message}`);
     }
 }
+
+// WiFi scan and datalist population
+async function scanWifiNetworks() {
+    try {
+        if (!wifiSSIDList) return;
+        const res = await fetch('/api/wifi/scan');
+        if (!res.ok) throw new Error('Scan failed');
+        const data = await res.json();
+        // Clear existing options
+        while (wifiSSIDList.firstChild) {
+            wifiSSIDList.removeChild(wifiSSIDList.firstChild);
+        }
+        if (Array.isArray(data.ssids)) {
+            const frag = document.createDocumentFragment();
+            data.ssids.forEach(ssid => {
+                if (!ssid) return;
+                const opt = document.createElement('option');
+                opt.value = ssid;
+                frag.appendChild(opt);
+            });
+            wifiSSIDList.appendChild(frag);
+        }
+    } catch (err) {
+        console.error('Error scanning WiFi networks:', err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof scanWifiNetworks === 'function') {
+        // Perform initial scan on load
+        scanWifiNetworks();
+    }
+    if (wifiScanBtn) {
+        wifiScanBtn.addEventListener('click', scanWifiNetworks);
+    }
+});

@@ -205,6 +205,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    cd ~
    git clone https://github.com/Marcinkowski-D/dmScreen.git
    ```
+   
+Install Prerequisites for PIL
+
+# Systemabhängigkeiten installieren
+sudo apt-get update
+sudo apt-get install -y libjpeg-dev zlib1g-dev libtiff5-dev libfreetype6-dev liblcms2-dev libwebp-dev tcl8.6-dev tk8.6-dev python3-tk libharfbuzz-dev libfribidi-dev libxcb1-dev
+
 
 2. Make the startup script executable:
    ```

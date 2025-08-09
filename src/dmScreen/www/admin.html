@@ -194,7 +194,11 @@
             <form id="wifi-form">
                 <div class="form-group">
                     <label for="wifi-ssid">SSID:</label>
-                    <input type="text" id="wifi-ssid" name="ssid" placeholder="Network name">
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" id="wifi-ssid" name="ssid" placeholder="Network name" list="wifi-ssid-list">
+                        <button type="button" id="wifi-scan-btn" class="btn">Scan</button>
+                    </div>
+                    <datalist id="wifi-ssid-list"></datalist>
                 </div>
                 <div class="form-group">
                     <label for="wifi-password">Password:</label>

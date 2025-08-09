@@ -26,11 +26,27 @@
             width: 100vw;
             height: 100vh;
         }
+        .ip-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 24px;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+        }
+        .ip-overlay.hidden {
+            display: none;
+        }
     </style>
 </head>
 <body class="view-body">
     <div id="image-container" class="fullscreen-container">
         <canvas id="display-canvas" class="fullscreen-image"></canvas>
+        <div id="ip-overlay" class="ip-overlay"></div>
     </div>
     <script src="js/view.js"></script>
 </body>

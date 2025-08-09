@@ -1,47 +1,121 @@
+import os
+import json
 import subprocess
 import time
 import threading
+from threading import Lock
 from flask import jsonify, request
+
+# File-based storage for known WiFi networks (cleartext as required)
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+_DATA_DIR = os.path.join(_PROJECT_ROOT, 'data')
+KNOWN_WIFI_FILE = os.path.join(_DATA_DIR, 'wifi_networks.json')
+_os_lock = Lock()
+
+# Ensure data directory exists
+os.makedirs(_DATA_DIR, exist_ok=True)
+
+# -----------------------------
+# Helpers for known networks
+# -----------------------------
+
+def _load_known_networks():
+    try:
+        with _os_lock:
+            if not os.path.exists(KNOWN_WIFI_FILE):
+                return []
+            with open(KNOWN_WIFI_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                return data.get('networks', [])
+    except Exception:
+        return []
+
+
+def _save_known_networks(networks):
+    with _os_lock:
+        with open(KNOWN_WIFI_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'networks': networks}, f, indent=2, ensure_ascii=False)
+
+
+def add_known_network(ssid, password):
+    networks = _load_known_networks()
+    updated = False
+    for n in networks:
+        if n.get('ssid') == ssid:
+            n['password'] = password
+            updated = True
+            break
+    if not updated:
+        networks.append({'ssid': ssid, 'password': password})
+    _save_known_networks(networks)
+    return True
+
+
+def list_known_networks():
+    return _load_known_networks()
+
+
+def remove_known_network(ssid):
+    networks = _load_known_networks()
+    new_list = [n for n in networks if n.get('ssid') != ssid]
+    removed = len(new_list) != len(networks)
+    if removed:
+        _save_known_networks(new_list)
+    return removed
+
+# -----------------------------
+# WiFi/OS utilities
+# -----------------------------
+
+def _run_cmd(args, check=False):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=check)
+    except Exception as e:
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout='', stderr=str(e))
+
 
 # WiFi-related functions
 
 def check_wifi_connection():
-    """Check if WiFi is connected"""
+    """Check if WiFi is connected (Raspberry Pi: iwgetid -r)"""
     try:
-        # This command works on Raspberry Pi with Raspbian
-        result = subprocess.run(['iwgetid', '-r'], capture_output=True, text=True)
-        return result.stdout.strip() != ""
-    except:
+        result = _run_cmd(['iwgetid', '-r'])
+        return result.stdout.strip() != ''
+    except Exception:
         return False
-        
+
+
+def current_ssid():
+    try:
+        result = _run_cmd(['iwgetid', '-r'])
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
 def check_adhoc_network():
-    """Check if adhoc network is active"""
+    """Check if adhoc network (hostapd) is active"""
     try:
-        # Check if hostapd service is running
-        result = subprocess.run(['systemctl', 'is-active', 'hostapd'], capture_output=True, text=True)
-        return result.stdout.strip() == "active"
-    except:
+        result = _run_cmd(['systemctl', 'is-active', 'hostapd'])
+        return result.stdout.strip() == 'active'
+    except Exception:
         return False
 
-def create_adhoc_network():
-    """Create an ad-hoc network if WiFi is not connected"""
-    try:
-        # Stop any existing hostapd and dnsmasq services
-        subprocess.run(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
-        
-        # Ensure hostapd directory exists
-        import os
-        hostapd_dir = '/etc/hostapd'
-        
-        # Try to create the directory using sudo
-        try:
-            if not os.path.exists(hostapd_dir):
-                subprocess.run(['sudo', 'mkdir', '-p', hostapd_dir], check=True)
 
-            # Use sudo to write the configuration file
-            hostapd_conf = """interface=wlan0
-driver=nl80211
-ssid=DMScreen
+def _stop_ap_services():
+    _run_cmd(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
+
+
+def _start_ap_services():
+    _run_cmd(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
+
+
+def _write_hostapd_and_dnsmasq():
+    """Write configs for hostapd and dnsmasq for AP SSID/password 'dmscreen'"""
+    hostapd_conf = """interface=wlan0
+ssid=dmscreen
 hw_mode=g
 channel=7
 wmm_enabled=0
@@ -49,142 +123,251 @@ macaddr_acl=0
 auth_algs=1
 ignore_broadcast_ssid=0
 wpa=2
-wpa_passphrase=dmscreen123
+wpa_passphrase=dmscreen
 wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 """
-            # Write to a temporary file first
-            with open('hostapd.conf.tmp', 'w') as f:
-                f.write(hostapd_conf)
-            
-            # Then use sudo to move it to the correct location
-            subprocess.run(['sudo', 'mv', 'hostapd.conf.tmp', '/etc/hostapd/hostapd.conf'], check=True)
-            print("Hostapd configuration written successfully")
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Failed to create hostapd configuration: {e}")
-            
-        # Configure hostapd (this is now done above using a different approach)
-        
-        # Configure dnsmasq
-        dnsmasq_dir = '/etc'
-        
-        # Try to create the directory using sudo (though /etc should always exist)
-        try:
-            if not os.path.exists(dnsmasq_dir):
-                subprocess.run(['sudo', 'mkdir', '-p', dnsmasq_dir], check=True)
-
-            # Use sudo to write the configuration file
-            dnsmasq_conf = """interface=wlan0
+    dnsmasq_conf = """interface=wlan0
 dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
 """
-            # Write to a temporary file first
-            with open('dnsmasq.conf.tmp', 'w') as f:
-                f.write(dnsmasq_conf)
-            
-            # Then use sudo to move it to the correct location
-            subprocess.run(['sudo', 'mv', 'dnsmasq.conf.tmp', '/etc/dnsmasq.conf'], check=True)
-            print("Dnsmasq configuration written successfully")
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Failed to create dnsmasq configuration: {e}")
-        
-        # Configure network interface
-        subprocess.run(['sudo', 'ifconfig', 'wlan0', '192.168.4.1', 'netmask', '255.255.255.0'])
-        
-        # Start services
-        subprocess.run(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
-        
-        print("Ad-hoc network created successfully")
+    try:
+        # Ensure dirs
+        if not os.path.exists('/etc/hostapd'):
+            _run_cmd(['sudo', 'mkdir', '-p', '/etc/hostapd'], check=True)
+        # Write temp files then move with sudo mv
+        with open('hostapd.conf.tmp', 'w', encoding='utf-8') as f:
+            f.write(hostapd_conf)
+        _run_cmd(['sudo', 'mv', 'hostapd.conf.tmp', '/etc/hostapd/hostapd.conf'], check=True)
+
+        with open('dnsmasq.conf.tmp', 'w', encoding='utf-8') as f:
+            f.write(dnsmasq_conf)
+        _run_cmd(['sudo', 'mv', 'dnsmasq.conf.tmp', '/etc/dnsmasq.conf'], check=True)
         return True
-    except FileNotFoundError as e:
-        print(f"Error creating ad-hoc network - File or directory not found: {e}")
-        print("Make sure hostapd and dnsmasq are installed: sudo apt-get install hostapd dnsmasq")
+    except Exception as e:
+        print(f'Failed to write AP configs: {e}')
         return False
-    except PermissionError as e:
-        print(f"Error creating ad-hoc network - Permission denied: {e}")
-        print("Make sure the script is run with sufficient privileges")
-        return False
+
+
+def create_adhoc_network():
+    """Create an ad-hoc AP if no WiFi connected. SSID/PW = dmscreen/dmscreen"""
+    try:
+        _stop_ap_services()
+        ok = _write_hostapd_and_dnsmasq()
+        # Set static IP on wlan0 for AP network
+        _run_cmd(['sudo', 'ifconfig', 'wlan0', '192.168.4.1', 'netmask', '255.255.255.0'])
+        if ok:
+            _start_ap_services()
+        # Wait briefly and verify
+        time.sleep(2)
+        is_active = check_adhoc_network()
+        if is_active:
+            print('Ad-hoc network (dmscreen) is active')
+        else:
+            print('Ad-hoc network failed to start')
+        return is_active
     except Exception as e:
         print(f"Error creating ad-hoc network: {e}")
         return False
 
-def configure_wifi(ssid, password):
-    """Configure WiFi with provided credentials"""
-    try:
-        # Stop ad-hoc network if running
-        subprocess.run(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
-        
-        # Update wpa_supplicant configuration
-        with open('/etc/wpa_supplicant/wpa_supplicant.conf', 'w') as f:
-            f.write(f"""ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=US
 
-network={{
-    ssid="{ssid}"
-    psk="{password}"
-    key_mgmt=WPA-PSK
-}}
-""")
-        
-        # Reconfigure wpa_supplicant
-        subprocess.run(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
-        
-        # Wait for connection
-        time.sleep(10)
-        
+def _write_wpa_supplicant(networks):
+    """Write /etc/wpa_supplicant/wpa_supplicant.conf with multiple networks"""
+    header = """ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=DE
+
+"""
+    blocks = []
+    for prio, net in enumerate(networks[::-1], start=1):
+        ssid = net.get('ssid', '')
+        psk = net.get('password', '')
+        blocks.append(
+            f"network={{\n    ssid=\"{ssid}\"\n    psk=\"{psk}\"\n    key_mgmt=WPA-PSK\n    priority={prio}\n}}\n"
+        )
+    content = header + ''.join(blocks)
+    with open('wpa_supplicant.conf.tmp', 'w', encoding='utf-8') as f:
+        f.write(content)
+    _run_cmd(['sudo', 'mv', 'wpa_supplicant.conf.tmp', '/etc/wpa_supplicant/wpa_supplicant.conf'], check=True)
+
+
+def _reconfigure_wpa():
+    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+
+
+def _scan_visible_ssids():
+    """Return a set of visible SSIDs using iw or nmcli"""
+    ssids = set()
+    # Try iw dev wlan0 scan
+    res = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
+    if res.returncode == 0 and res.stdout:
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if line.startswith('SSID:'):
+                ssids.add(line.split('SSID:', 1)[1].strip())
+    else:
+        # Fallback to iwlist
+        res2 = _run_cmd(['iwlist', 'wlan0', 'scanning'])
+        if res2.returncode == 0 and res2.stdout:
+            for line in res2.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('ESSID:'):
+                    name = line.split('ESSID:', 1)[1].strip().strip('"')
+                    if name:
+                        ssids.add(name)
+        else:
+            # Fallback to nmcli
+            res3 = _run_cmd(['nmcli', '-t', '-f', 'SSID', 'dev', 'wifi'])
+            if res3.returncode == 0 and res3.stdout:
+                for line in res3.stdout.splitlines():
+                    name = line.strip()
+                    if name:
+                        ssids.add(name)
+    return ssids
+
+
+def connect_best_known_network():
+    """Try to connect to the best available known network based on scan results"""
+    try:
+        known = _load_known_networks()
+        if not known:
+            return False
+        visible = _scan_visible_ssids()
+        if not visible:
+            return False
+        # Keep networks that are visible
+        candidates = [n for n in known if n.get('ssid') in visible]
+        if not candidates:
+            return False
+        # Prefer order in the stored list (latest wins at higher priority)
+        _stop_ap_services()
+        _write_wpa_supplicant(candidates)
+        _reconfigure_wpa()
+        time.sleep(8)
+        return check_wifi_connection()
+    except Exception as e:
+        print(f'connect_best_known_network error: {e}')
+        return False
+
+
+def configure_wifi(ssid, password):
+    """Configure WiFi: persist credentials and attempt to connect"""
+    try:
+        add_known_network(ssid, password)
+        # Write full known list to wpa_supplicant
+        networks = _load_known_networks()
+        _stop_ap_services()
+        _write_wpa_supplicant(networks)
+        _reconfigure_wpa()
+        time.sleep(8)
         return check_wifi_connection()
     except Exception as e:
         print(f"Error configuring WiFi: {e}")
         return False
 
+
 def wifi_monitor():
-    """Background thread to monitor WiFi and create ad-hoc network if needed"""
+    """Background thread to ensure connectivity: connect to known networks, else start AP"""
     while True:
-        if not check_wifi_connection():
-            create_adhoc_network()
+        try:
+            if not check_wifi_connection():
+                # Try connect to the best known network first
+                connected = connect_best_known_network()
+                if not connected and not check_adhoc_network():
+                    create_adhoc_network()
+        except Exception as e:
+            print(f'wifi_monitor loop error: {e}')
         time.sleep(60)  # Check every minute
 
 # Flask route handlers for WiFi functionality
-def register_wifi_routes(app):
+def register_wifi_routes(app, on_change=None):
     @app.route('/api/wifi/status', methods=['GET'])
     def get_wifi_status():
         connected = check_wifi_connection()
         adhoc_active = False
         adhoc_ssid = None
-        
         if not connected:
             adhoc_active = check_adhoc_network()
             if adhoc_active:
-                adhoc_ssid = "DMScreen"  # This is the SSID set in create_adhoc_network()
-                
+                adhoc_ssid = 'dmscreen'
         return jsonify({
             'connected': connected,
-            'ssid': subprocess.run(['iwgetid', '-r'], capture_output=True, text=True).stdout.strip() if connected else None,
+            'ssid': current_ssid() if connected else None,
             'adhoc_active': adhoc_active,
             'adhoc_ssid': adhoc_ssid
         })
 
     @app.route('/api/wifi/configure', methods=['POST'])
     def set_wifi_config():
-        data = request.get_json()
+        data = request.get_json() or {}
         ssid = data.get('ssid')
         password = data.get('password')
-        
         if not ssid or not password:
             return jsonify({'error': 'SSID and password are required'}), 400
-        
         success = configure_wifi(ssid, password)
-        
+        if success and on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
         return jsonify({
             'success': success,
             'message': 'WiFi configured successfully' if success else 'Failed to configure WiFi'
         })
 
+    @app.route('/api/wifi/known', methods=['GET'])
+    def api_list_known():
+        return jsonify({'networks': list_known_networks()})
+
+    @app.route('/api/wifi/known', methods=['POST'])
+    def api_add_known():
+        data = request.get_json() or {}
+        ssid = data.get('ssid')
+        password = data.get('password')
+        if not ssid or not password:
+            return jsonify({'error': 'SSID and password are required'}), 400
+        add_known_network(ssid, password)
+        if on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        return jsonify({'success': True})
+
+    @app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
+    def api_remove_known(ssid):
+        removed = remove_known_network(ssid)
+        # Update wpa_supplicant to reflect removal
+        try:
+            nets = _load_known_networks()
+            _write_wpa_supplicant(nets)
+            _reconfigure_wpa()
+        except Exception:
+            pass
+        if on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        return jsonify({'removed': removed})
+
+    @app.route('/api/wifi/scan', methods=['GET'])
+    def api_scan():
+        try:
+            ssids = sorted(list(_scan_visible_ssids()))
+            return jsonify({'ssids': ssids})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     return {
         'get_wifi_status': get_wifi_status,
-        'set_wifi_config': set_wifi_config
+        'set_wifi_config': set_wifi_config,
+        'list_known': api_list_known,
+        'add_known': api_add_known,
+        'remove_known': api_remove_known,
+        'scan': api_scan,
     }
+
 
 def start_wifi_monitor():
     """Start the WiFi monitoring thread"""

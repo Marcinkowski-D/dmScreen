@@ -1,6 +1,7 @@
 // DOM Elements
 const displayCanvas = document.getElementById('display-canvas');
 const imageContainer = document.getElementById('image-container');
+const ipOverlay = document.getElementById('ip-overlay');
 
 // Canvas context
 const displayCtx = displayCanvas.getContext('2d');
@@ -9,15 +10,15 @@ const displayCtx = displayCanvas.getContext('2d');
 function drawImageContain(ctx, img, canvasWidth, canvasHeight) {
     // Clear the canvas
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    
+
     // Calculate dimensions to fit the image within the canvas while maintaining aspect ratio
     const imgWidth = img.width;
     const imgHeight = img.height;
     const imgAspect = imgWidth / imgHeight;
     const canvasAspect = canvasWidth / canvasHeight;
-    
+
     let drawWidth, drawHeight, offsetX, offsetY;
-    
+
     if (imgAspect > canvasAspect) {
         // Image is wider than canvas (relative to height)
         drawWidth = canvasWidth;
@@ -31,7 +32,7 @@ function drawImageContain(ctx, img, canvasWidth, canvasHeight) {
         offsetX = (canvasWidth - drawWidth) / 2;
         offsetY = 0;
     }
-    
+
     // Draw the image
     ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 }
@@ -84,7 +85,7 @@ const POLLING_INTERVAL = 2000; // Poll every 2 seconds
 document.addEventListener('DOMContentLoaded', () => {
     // Request current state from server
     fetchCurrentState();
-    
+
     // Start polling for updates
     startPolling();
 });
@@ -93,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function startPolling() {
     // Initial fetch
     fetchUpdates();
-    
+
     // Set up interval for polling
     setInterval(fetchUpdates, POLLING_INTERVAL);
 }
@@ -102,11 +103,17 @@ async function fetchUpdates() {
     try {
         const response = await fetch('/api/updates');
         const data = await response.json();
-        
+
         // If there's a new update, fetch the current state
         if (data.timestamp > lastUpdateTimestamp) {
             lastUpdateTimestamp = data.timestamp;
             fetchCurrentState();
+        }
+        if (data.admin_connected) {
+            ipOverlay.classList.add('hidden')
+        } else {
+            ipOverlay.innerText = "Server: " + data.ip
+            ipOverlay.classList.remove('hidden')
         }
     } catch (error) {
         console.error('Error checking for updates:', error);
@@ -120,46 +127,46 @@ async function fetchCurrentState() {
 
         // Update last timestamp
         lastUpdateTimestamp = data.timestamp;
-        
+
         // Check if images have changed
         const oldImages = images;
         const oldSettings = settings;
-        
+
         // Update data
         settings = data.settings;
         images = data.images;
-        
+
         // Handle image deletion
         if (oldImages.length > 0 && oldSettings.current_image) {
             const oldImage = oldImages.find(img => img.id === oldSettings.current_image);
             const newImage = images.find(img => img.id === oldSettings.current_image);
-            
+
             if (oldImage && !newImage) {
                 // Image was deleted, update display
                 updateDisplay();
                 return;
             }
         }
-        
+
         // Handle settings changes
-        if (oldSettings.current_image !== settings.current_image || 
+        if (oldSettings.current_image !== settings.current_image ||
             oldSettings.screensaver !== settings.screensaver) {
             updateDisplay();
             return;
         }
-        
+
         // Handle image updates
         if (settings.current_image) {
             const oldImage = oldImages.find(img => img.id === settings.current_image);
             const newImage = images.find(img => img.id === settings.current_image);
-            
+
             if (oldImage && newImage) {
                 // Check if path or name changed
                 if (oldImage.path !== newImage.path || oldImage.name !== newImage.name) {
                     updateDisplay(true);
                     return;
                 }
-                
+
                 // If timestamp changed significantly and we're displaying this image,
                 // force a refresh to handle rotated images
                 if (settings.current_image) {
@@ -168,7 +175,7 @@ async function fetchCurrentState() {
                 }
             }
         }
-        
+
         // If this is the first load, update display
         if (oldImages.length === 0) {
             updateDisplay();
@@ -184,10 +191,10 @@ function updateDisplay(forceRefresh = false) {
     if (isTransitioning) return;
 
     isTransitioning = true;
-    
+
     // Determine which image to display
     let imageToShow = null;
-    
+
     if (settings.current_image) {
         // Show the currently selected image
         imageToShow = images.find(img => img.id === settings.current_image);
@@ -196,10 +203,10 @@ function updateDisplay(forceRefresh = false) {
         // Show the screensaver image
         imageToShow = images.find(img => img.id === settings.screensaver);
     }
-    
+
     // Track if we're switching from thumbnail to full image (no fade needed)
     const isSwitchingToFullImage = displayCanvas.dataset.loadingFullImage === 'true';
-    
+
     if (!isSwitchingToFullImage) {
         // Fade out the current image (unless we're just switching from thumbnail to full)
         displayCanvas.classList.remove('fade-in');
@@ -208,14 +215,14 @@ function updateDisplay(forceRefresh = false) {
         // When switching to full image, ensure we're not in fade-out state
         displayCanvas.classList.remove('fade-out');
     }
-    
+
     // Function to load the image
     const loadImage = async () => {
         if (imageToShow) {
             // If canvas was hidden, show it first
             displayCanvas.classList.remove('hidden');
             imageContainer.style.display = 'flex';
-            
+
             try {
                 if (!isSwitchingToFullImage) {
                     // First load the thumbnail by fetching the URL from the server
@@ -223,34 +230,34 @@ function updateDisplay(forceRefresh = false) {
                     if (!response.ok) {
                         throw new Error('Failed to fetch thumbnail URL');
                     }
-                    
+
                     const data = await response.json();
                     const thumbnailUrl = data.url;
-                    
+
                     // Create a new Image object for the thumbnail
                     const thumbnailImg = new Image();
-                    
+
                     // When the thumbnail loads, draw it on the canvas and fade it in
                     thumbnailImg.onload = () => {
                         // Draw the image on the canvas
                         drawImageContain(displayCtx, thumbnailImg, displayCanvas.width, displayCanvas.height);
-                        
+
                         // Fade in the canvas
                         displayCanvas.classList.remove('fade-out');
                         displayCanvas.classList.add('fade-in');
-                        
+
                         // Mark that we're now loading the full image
                         displayCanvas.dataset.loadingFullImage = 'true';
-                        
+
                         // Reset transitioning state so the next updateDisplay call works
                         isTransitioning = false;
-                        
+
                         // After thumbnail is displayed, load the full image
                         setTimeout(() => {
                             updateDisplay();
                         }, 100);
                     };
-                    
+
                     // Handle thumbnail load errors
                     thumbnailImg.onerror = () => {
                         console.error('Failed to load thumbnail:', thumbnailUrl);
@@ -260,7 +267,7 @@ function updateDisplay(forceRefresh = false) {
                         isTransitioning = false;
                         updateDisplay();
                     };
-                    
+
                     // Start loading the thumbnail
                     thumbnailImg.src = thumbnailUrl;
                 } else {
@@ -270,18 +277,18 @@ function updateDisplay(forceRefresh = false) {
                     if (!response.ok) {
                         throw new Error('Failed to fetch image URL');
                     }
-                    
+
                     const data = await response.json();
                     const imageUrl = data.url;
-                    
+
                     // Create a new Image object for the full image
                     const fullImg = new Image();
-                    
+
                     // When the full image loads, draw it on the canvas and complete the transition
                     fullImg.onload = () => {
                         // Draw the image on the canvas
                         drawImageContain(displayCtx, fullImg, displayCanvas.width, displayCanvas.height);
-                        
+
                         // Fade in the canvas
                         displayCanvas.classList.remove('fade-out');
                         displayCanvas.classList.add('fade-in');
@@ -289,7 +296,7 @@ function updateDisplay(forceRefresh = false) {
                         // Clear the loading flag
                         delete displayCanvas.dataset.loadingFullImage;
                     };
-                    
+
                     // Handle full image load errors
                     fullImg.onerror = () => {
                         console.error('Failed to load image:', imageUrl);
@@ -300,7 +307,7 @@ function updateDisplay(forceRefresh = false) {
                         // Clear the loading flag
                         delete displayCanvas.dataset.loadingFullImage;
                     };
-                    
+
                     // Start loading the full image
                     fullImg.src = imageUrl;
                 }
@@ -320,7 +327,7 @@ function updateDisplay(forceRefresh = false) {
             delete displayCanvas.dataset.loadingFullImage;
         }
     };
-    
+
     if (isSwitchingToFullImage || forceRefresh) {
         // If we're just switching from thumbnail to full image, do it immediately
         loadImage();

@@ -146,7 +146,7 @@ def cache_worker(cache_folder: str, upload_folder: str):
         except Exception as e:
             print(f"Error in cache worker: {e}")
 
-def queue_image_for_caching(image_path: str, width: Optional[int], img_hash:str, crop: bool,
+def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
                            db, upload_folder: str):
     """
     Queue an image for background caching and also queue related images.
