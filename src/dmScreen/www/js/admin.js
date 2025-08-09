@@ -9,6 +9,7 @@ const wifiSSIDInput = document.getElementById('wifi-ssid');
 const wifiPasswordInput = document.getElementById('wifi-password');
 const wifiScanBtn = document.getElementById('wifi-scan-btn');
 const wifiSSIDList = document.getElementById('wifi-ssid-list');
+const wifiDisconnectBtn = document.getElementById('wifi-disconnect-btn');
 const previewCanvas = document.getElementById('preview-canvas');
 const previewStatus = document.getElementById('preview-status');
 const resetDisplayBtn = document.getElementById('reset-display');
@@ -1201,12 +1202,19 @@ async function checkWifiStatus() {
 
         if (data.connected) {
             wifiStatus.innerHTML = `<span class="connected">Connected to: ${data.ssid}</span>`;
+            if (wifiForm) wifiForm.style.display = 'none';
+            if (wifiDisconnectBtn) wifiDisconnectBtn.style.display = 'inline-block';
         } else {
             wifiStatus.innerHTML = `<span class="disconnected">Not connected to WiFi</span>`;
+            if (wifiForm) wifiForm.style.display = 'block';
+            if (wifiDisconnectBtn) wifiDisconnectBtn.style.display = 'none';
+            if (typeof scanWifiNetworks === 'function') scanWifiNetworks();
         }
 
     } catch (error) {
         wifiStatus.innerHTML = `<span class="disconnected">Error checking WiFi status</span>`;
+        if (wifiForm) wifiForm.style.display = 'block';
+        if (wifiDisconnectBtn) wifiDisconnectBtn.style.display = 'none';
     }
 }
 
@@ -2258,5 +2266,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (wifiScanBtn) {
         wifiScanBtn.addEventListener('click', scanWifiNetworks);
+    }
+    if (wifiDisconnectBtn) {
+        wifiDisconnectBtn.addEventListener('click', async () => {
+            try {
+                await showConfirm('Disconnect from current WiFi and forget it?', 'Disconnect WiFi');
+            } catch (_) {
+                return; // cancelled
+            }
+            try {
+                showBackdrop('Disconnecting...');
+                const resp = await fetch('/api/wifi/disconnect', { method: 'POST' });
+                hideBackdrop();
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    const ssidText = data.ssid ? ` from: ${data.ssid}` : '';
+                    showAlert(`Disconnected${ssidText}.`);
+                    setTimeout(checkWifiStatus, 2000);
+                } else {
+                    showAlert('Failed to disconnect WiFi');
+                }
+            } catch (err) {
+                hideBackdrop();
+                showAlert(`Error: ${err.message}`);
+            }
+        });
     }
 });

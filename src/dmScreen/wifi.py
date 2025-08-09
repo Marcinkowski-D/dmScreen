@@ -266,6 +266,33 @@ def configure_wifi(ssid, password):
         return False
 
 
+def disconnect_and_forget_current():
+    """Disconnect from the currently connected WiFi and forget it from known networks.
+    Returns (success, ssid)."""
+    try:
+        ssid = current_ssid()
+        # Attempt to disconnect regardless of state
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'disconnect'])
+        # Remove from known networks if present
+        if ssid:
+            try:
+                remove_known_network(ssid)
+            except Exception:
+                pass
+        # Rewrite wpa_supplicant based on remaining networks and reconfigure
+        try:
+            nets = _load_known_networks()
+            _write_wpa_supplicant(nets)
+            _reconfigure_wpa()
+        except Exception as e:
+            print(f'Error updating wpa_supplicant during disconnect: {e}')
+        time.sleep(3)
+        return True, ssid
+    except Exception as e:
+        print(f'disconnect_and_forget_current error: {e}')
+        return False, None
+
+
 def wifi_monitor():
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     while True:
@@ -359,6 +386,16 @@ def register_wifi_routes(app, on_change=None):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/wifi/disconnect', methods=['POST'])
+    def api_disconnect():
+        success, ssid = disconnect_and_forget_current()
+        if success and on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        return jsonify({'success': success, 'ssid': ssid})
+
     return {
         'get_wifi_status': get_wifi_status,
         'set_wifi_config': set_wifi_config,
@@ -366,6 +403,7 @@ def register_wifi_routes(app, on_change=None):
         'add_known': api_add_known,
         'remove_known': api_remove_known,
         'scan': api_scan,
+        'disconnect': api_disconnect,
     }
 
 
