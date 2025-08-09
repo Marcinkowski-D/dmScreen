@@ -195,6 +195,75 @@ def _reconfigure_wpa():
     _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
 
 
+def _os_forget_network_wpa(ssid: str):
+    """Remove matching SSID networks from wpa_supplicant runtime and save config."""
+    try:
+        res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
+        if res.returncode != 0 or not res.stdout:
+            return False
+        removed_any = False
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if not line or line.lower().startswith('network id'):
+                continue
+            # wpa_cli list_networks output is tab-separated: id\tssid\tbssid\tflags
+            parts = [p for p in line.split('\t') if p != '']
+            if len(parts) < 2:
+                parts = [p for p in line.split() if p != '']
+            if len(parts) >= 2:
+                nid = parts[0].strip()
+                s = parts[1].strip()
+                if s == ssid:
+                    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'remove_network', nid])
+                    removed_any = True
+        if removed_any:
+            _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'save_config'])
+            _reconfigure_wpa()
+        return removed_any
+    except Exception as e:
+        print(f'_os_forget_network_wpa error: {e}')
+        return False
+
+
+def _os_forget_network_nmcli(ssid: str):
+    """If NetworkManager is present, delete connection with this SSID name."""
+    try:
+        res = _run_cmd(['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'])
+        if res.returncode != 0 or not res.stdout:
+            return False
+        deleted = False
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(':')
+            if len(parts) >= 2:
+                name, ctype = parts[0], parts[1]
+                # typical types: wifi or 802-11-wireless
+                if name == ssid and ('wifi' in ctype or '802-11-wireless' in ctype):
+                    _run_cmd(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid])
+                    deleted = True
+        return deleted
+    except Exception as e:
+        # nmcli may not exist; ignore
+        return False
+
+
+def _forget_network_everywhere(ssid: str):
+    removed = False
+    try:
+        if ssid:
+            removed = _os_forget_network_wpa(ssid) or removed
+    except Exception:
+        pass
+    try:
+        if ssid:
+            removed = _os_forget_network_nmcli(ssid) or removed
+    except Exception:
+        pass
+    return removed
+
+
 def _scan_visible_ssids():
     """Return a set of visible SSIDs using iw or nmcli"""
     ssids = set()
@@ -271,6 +340,12 @@ def disconnect_and_forget_current():
     Returns (success, ssid)."""
     try:
         ssid = current_ssid()
+        # Proactively remove the network from OS runtime configs so it won't reconnect
+        if ssid:
+            try:
+                _forget_network_everywhere(ssid)
+            except Exception:
+                pass
         # Attempt to disconnect regardless of state
         _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'disconnect'])
         # Remove from known networks if present
@@ -364,6 +439,11 @@ def register_wifi_routes(app, on_change=None):
     @app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
     def api_remove_known(ssid):
         removed = remove_known_network(ssid)
+        # Also ensure OS forgets the network so it won't reconnect
+        try:
+            _forget_network_everywhere(ssid)
+        except Exception:
+            pass
         # Update wpa_supplicant to reflect removal
         try:
             nets = _load_known_networks()
