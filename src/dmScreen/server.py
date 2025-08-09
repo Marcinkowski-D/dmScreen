@@ -48,7 +48,7 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network
+from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network, current_ssid
 
 # Global variables
 admin_connected = False  # Track if admin has connected
@@ -465,12 +465,35 @@ def get_current_state():
 @app.route('/api/updates', methods=['GET'])
 def check_updates():
     global last_update_timestamp, admin_connected
-    # Get the server's IP address
-    ip_address = get_lan_ip()
+    # Determine network status first
+    try:
+        connected = check_wifi_connection()
+    except Exception:
+        connected = False
+    try:
+        ssid = current_ssid() if connected else None
+    except Exception:
+        ssid = None
+    adhoc_active = False
+    if not connected:
+        try:
+            adhoc_active = check_adhoc_network()
+        except Exception:
+            adhoc_active = False
+    # Choose IP depending on mode
+    ip_address = '192.168.4.1' if adhoc_active else get_lan_ip()
+    port = int(os.getenv('PORT', '80'))
+    port_part = '' if port == 80 else f':{port}'
+    admin_url = f"http://{ip_address}{port_part}/admin"
     return jsonify({
         'timestamp': last_update_timestamp,
         'admin_connected': admin_connected,
-        'ip': ip_address + ':' + os.getenv('PORT', '5000') + '/admin'
+        'ip': admin_url,
+        'wifi_connected': connected,
+        'ssid': ssid,
+        'adhoc_active': adhoc_active,
+        'adhoc_ssid': 'dmscreen' if adhoc_active else None,
+        'adhoc_password': 'dmscreen' if adhoc_active else None
     })
 
 @app.route('/api/images', methods=['GET'])
@@ -954,15 +977,17 @@ def main():
         print('not linux!')
     
     try:
+        PORT = int(os.getenv('PORT', '80'))
         # Start the server
         lan_ip = get_lan_ip()
-        print('running server on port 5000')
-        print('Local admin URL: http://127.0.0.1:5000/admin')
-        print('Local view URL: http://127.0.0.1:5000/view')
-        print(f'Network admin URL: http://{lan_ip}:5000/admin')
-        print(f'Network view URL: http://{lan_ip}:5000/view')
+        print(f'running server on port {PORT}')
+        port_part = '' if PORT == 80 else f':{PORT}'
+        print(f'Local admin URL: http://127.0.0.1{port_part}/admin')
+        print(f'Local view URL: http://127.0.0.1{port_part}/view')
+        print(f'Network admin URL: http://{lan_ip}{port_part}/admin')
+        print(f'Network view URL: http://{lan_ip}{port_part}/view')
         print('server listening...')
-        app.run(host='0.0.0.0', port=int(os.getenv('PORT', '5000')), debug=True)
+        app.run(host='0.0.0.0', port=PORT, debug=True)
     finally:
         # Shutdown background caching system when server stops
         print('shutting down background caching system')

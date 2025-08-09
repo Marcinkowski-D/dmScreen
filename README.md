@@ -71,7 +71,7 @@ To brew this potion, you will need:
 2. Upload images of characters, monsters, maps, or other visual aids
 3. Click on an image in the gallery to display it to your players
 4. Configure a screensaver image for when no specific image is displayed
-5. Use the WiFi configuration to set up network connectivity if needed
+5. Use the WiFi configuration to set up network connectivity; use Scan to list SSIDs and Disconnect to forget the current WiFi
 
 ### For the Players
 
@@ -106,14 +106,33 @@ By default, the server binds to `0.0.0.0`, making it accessible to other devices
 1. Configure the WiFi settings in the admin interface
 2. Access the view interface from other devices using your server's IP address
 
+WiFi management highlights:
+- The device prefers connecting to known WiFi networks saved in data\wifi_networks.json (cleartext).
+- If no known network is available, it starts an access point with SSID 'dmscreen' and password 'dmscreen' (hostapd/dnsmasq).
+- In the admin interface:
+  - Use Scan to list currently visible SSIDs and auto-fill the SSID field.
+  - When connected, the WiFi form is hidden and a Disconnect button is shown; Disconnect will forget the current WiFi.
+- After any network change, the admin connection state is reset.
+
+API endpoints for WiFi management:
+- GET /api/wifi/status
+- POST /api/wifi/configure
+- GET /api/wifi/scan
+- GET /api/wifi/known
+- POST /api/wifi/known
+- DELETE /api/wifi/known/<ssid>
+- POST /api/wifi/disconnect
+
 ### Portability Enchantment
 
 The arcane artifact possesses a powerful nomadic enchantment, allowing it to adapt to different magical realms:
 
-- The artifact attempts to reconnect to the last known mystical network (WiFi) it was bound to
-- If no familiar network is detected, it creates its own magical aura (adhoc network) with customizable incantations (credentials configurable via .env)
-- You may commune with the artifact while connected only to its magical aura (IP 192.168.4.1:PORT) without requiring external magical sources
-- Alternatively, you can inscribe new network runes via the enchanted scroll at the bottom of the arcane interface
+- The artifact prefers connecting to known WiFi networks, scanning for visible SSIDs and selecting a matching one
+- If no known network is available, it creates its own magical aura (adhoc access point) with SSID "dmscreen" and password "dmscreen"
+- You may commune with the artifact while connected only to its magical aura (IP 192.168.4.1) without requiring external magical sources
+- From the admin interface (WiFi section), you can scan for available SSIDs, configure credentials, and disconnect/forget the current WiFi
+- Known networks can be listed/managed via the API endpoints
+- After any network change (connect/disconnect/AP), the admin connection state is reset
 
 This nomadic enchantment ensures that when you transport your screen to fellow wizards' towers, you may either use it in isolation or bind it to any local magical network.
 

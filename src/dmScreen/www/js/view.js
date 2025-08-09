@@ -112,7 +112,13 @@ async function fetchUpdates() {
         if (data.admin_connected) {
             ipOverlay.classList.add('hidden')
         } else {
-            ipOverlay.innerText = "Server: " + data.ip
+            const parts = ["Server: " + data.ip];
+            if (data.wifi_connected && data.ssid) {
+                parts.push("WLAN: " + data.ssid);
+            } else if (data.adhoc_active) {
+                parts.push("Ad-hoc: SSID " + (data.adhoc_ssid || 'dmscreen') + " | Passwort " + (data.adhoc_password || 'dmscreen'));
+            }
+            ipOverlay.textContent = parts.join(' | ');
             ipOverlay.classList.remove('hidden')
         }
     } catch (error) {
