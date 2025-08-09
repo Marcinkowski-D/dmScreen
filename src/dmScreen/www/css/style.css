@@ -227,6 +227,18 @@ textarea {
     margin: 0;
 }
 
+/* Ordner-Kachel als klickbar darstellen */
+.folder-item {
+    cursor: pointer;
+}
+
+/* Optional: sorgt dafür, dass auch innerhalb der Kachel (Icon/Name) der Pointer erscheint */
+.folder-item .folder-icon,
+.folder-item .folder-name {
+    cursor: pointer;
+}
+
+
 /* WiFi Status */
 #wifi-status {
     margin-bottom: 15px;
