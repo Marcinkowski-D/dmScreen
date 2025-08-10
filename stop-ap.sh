@@ -1,46 +1,49 @@
 #!/bin/bash
-# stop-ap.sh
-# Beendet den AP-Modus auf wlan0 und stellt Client-Betrieb wieder her (ohne eth0 zu verändern)
+# Stoppt AP auf wlan0 und stellt Client-Betrieb wieder her (eth0 unberührt).
 
 IFACE="wlan0"
 DNSMASQ_SNIPPET="/etc/dnsmasq.d/dmscreen.conf"
 
-log(){ echo -e "$@"; }
-need_root(){ [ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }; }
-svc_active(){ systemctl is-active --quiet "$1"; }
 have(){ command -v "$1" >/dev/null 2>&1; }
+svc_active(){ systemctl is-active --quiet "$1"; }
 
-need_root
-log "[*] Stoppe AP-Modus und stelle Client-Betrieb wieder her..."
+[ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }
+
+echo "[*] Stoppe AP-Modus und stelle Client-Betrieb auf wlan0 her..."
 
 # hostapd stoppen
 systemctl stop hostapd >/dev/null 2>&1 || true
 
-# dnsmasq-Snippet entfernen und Service reloaden (globaler Stop nicht nötig)
+# dnsmasq-Snippet entfernen und dnsmasq reloaden
 if [ -f "$DNSMASQ_SNIPPET" ]; then
   rm -f "$DNSMASQ_SNIPPET"
   if svc_active dnsmasq; then
-    systemctl reload dnsmasq || systemctl restart dnsmasq || true
+    systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null 2>&1 || true
   fi
 fi
 
-# wlan0 IP aufräumen
-ip addr flush dev "$IFACE" || true
-ip link set "$IFACE" down || true
-ip link set "$IFACE" up || true
+# wlan0 reinigen & hochfahren
+rfkill unblock wifi 2>/dev/null || true
+ip addr flush dev "$IFACE" 2>/dev/null || true
+ip link set "$IFACE" down 2>/dev/null || true
+ip link set "$IFACE" up 2>/dev/null || true
 
-# wpa_supplicant für Clientbetrieb sicherstellen
+# wpa_supplicant wieder aktivieren und Konfig neu laden
 systemctl start wpa_supplicant >/dev/null 2>&1 || systemctl start "wpa_supplicant@$IFACE" >/dev/null 2>&1 || true
-if have wpa_cli; then wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true; fi
+have wpa_cli && wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true
 
-# DHCP nur für wlan0 triggern (eth0 unberührt)
+# DHCP für wlan0 nudgen (+ letzter Fallback)
 have dhcpcd && { dhcpcd -x "$IFACE" >/dev/null 2>&1 || true; dhcpcd -n "$IFACE" >/dev/null 2>&1 || true; }
-
-# Status
 sleep 2
 WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
+if [ -z "$WLAN_IP" ] && have dhclient; then
+  dhclient -v "$IFACE" || true
+  sleep 2
+  WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
+fi
+
 ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
 
 echo "[+] AP gestoppt. Clientmodus wieder aktiv."
 echo "    WLAN-IP: ${WLAN_IP:- -}"
-[ -n "$ETH_IP" ] && echo "    LAN-IP:  ${ETH_IP}"
+[ -n "$ETH_IP" ] && echo "    LAN-IP:  $ETH_IP"

@@ -1,85 +1,52 @@
 #!/bin/bash
-# connect-wifi.sh
 # Nutzung: sudo ./connect-wifi.sh "SSID" "PASSWORT"
-# Schaltet ggf. aus AP-Modus zurück, startet wpa_supplicant und holt DHCP NUR für wlan0.
-# eth0 bleibt komplett unangetastet.
+# Schaltet ggf. aus AP zurück, aktiviert Client-Betrieb auf wlan0 und holt DHCP (eth0 unberührt).
 
 SSID="$1"
 PASS="$2"
+IFACE="wlan0"
 WPA_FILE="/etc/wpa_supplicant/wpa_supplicant.conf"
 DNSMASQ_SNIPPET="/etc/dnsmasq.d/dmscreen.conf"
-HOSTAPD_CONF="/etc/hostapd/hostapd.conf"
-IFACE="wlan0"
+HOSTAPD_SVC="hostapd"
 
-log(){ echo -e "$@"; }
-need_root(){ [ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }; }
-svc_active(){ systemctl is-active --quiet "$1"; }
 have(){ command -v "$1" >/dev/null 2>&1; }
+svc_active(){ systemctl is-active --quiet "$1"; }
 
-start_wpa(){
-  if svc_active wpa_supplicant; then
-    systemctl restart wpa_supplicant
-  else
-    systemctl start wpa_supplicant || systemctl start "wpa_supplicant@$IFACE" || true
-  fi
-}
+[ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }
+[ -n "$SSID" ] && [ -n "$PASS" ] || { echo "Nutzung: sudo $0 \"SSID\" \"PASSWORT\""; exit 1; }
 
-kick_dhcpcd_wlan(){
-  have dhcpcd && { dhcpcd -x "$IFACE" >/dev/null 2>&1 || true; dhcpcd -n "$IFACE" >/dev/null 2>&1 || true; }
-}
+echo "[*] Ziel: mit SSID \"$SSID\" verbinden (Client-Modus). Status wird ermittelt..."
 
-wait_ip(){
-  for i in {1..20}; do
-    WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
-    [ -n "$WLAN_IP" ] && return 0
-    sleep 1
-  done
-  return 1
-}
-
-# --- main ---
-need_root
-[ -z "$SSID" ] && { echo "Nutzung: sudo $0 \"SSID\" \"PASSWORT\""; exit 1; }
-[ -z "$PASS" ] && { echo "Nutzung: sudo $0 \"SSID\" \"PASSWORT\""; exit 1; }
-
-log "[*] Ziel: mit SSID \"$SSID\" verbinden (Client-Modus). Status wird ermittelt..."
-
-# Falls AP läuft: sauber abschalten, aber eth0 unberührt
-if svc_active hostapd; then
-  log "    - hostapd ist aktiv -> stoppe AP..."
-  systemctl stop hostapd || true
-fi
-
-# dnsmasq: nur unser Snippet entfernen, Service neu laden (kein harter Stop nötig)
+# 0) AP sauber beenden (nur wlan0-bezogen)
+systemctl stop "$HOSTAPD_SVC" >/dev/null 2>&1 || true
 if [ -f "$DNSMASQ_SNIPPET" ]; then
-  log "    - Entferne dnsmasq-Snippet $DNSMASQ_SNIPPET und reloade dnsmasq"
   rm -f "$DNSMASQ_SNIPPET"
   if svc_active dnsmasq; then
-    systemctl reload dnsmasq || systemctl restart dnsmasq || true
+    systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null 2>&1 || true
   fi
 fi
 
-# Sicherstellen, dass wlan0 „clean“ ist (keine alte statische AP-IP)
-ip addr flush dev "$IFACE" || true
-ip link set "$IFACE" up || true
+# 1) WLAN entsperren & hochfahren, alte IPs weg
+rfkill unblock wifi 2>/dev/null || true
+ip link set "$IFACE" up 2>/dev/null || true
+ip addr flush dev "$IFACE" 2>/dev/null || true
 
-# wpa_supplicant-Konfig aktualisieren (ohne eth0 anzufassen)
+# 2) wpa_supplicant-Konfig aktualisieren (Header sicherstellen, SSID-Block ersetzen)
 if [ -f "$WPA_FILE" ]; then
   cp "$WPA_FILE" "${WPA_FILE}.bak.$(date +%s)"
-else
-  mkdir -p "$(dirname "$WPA_FILE")"
 fi
+mkdir -p "$(dirname "$WPA_FILE")"
 
-# Header sicherstellen
-grep -q '^ctrl_interface=' "$WPA_FILE" 2>/dev/null || {
-  cat <<'HDR' > "$WPA_FILE"
+# Header schreiben/erhalten
+if ! grep -q '^ctrl_interface=' "$WPA_FILE" 2>/dev/null; then
+  cat > "$WPA_FILE" <<'HDR'
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 country=DE
 HDR
-}
+fi
 
-# Netzwerkblock für SSID hinzufügen/ersetzen
+# SSID-Block ersetzen/hinzufügen
 awk -v ssid="$SSID" -v pass="$PASS" '
 BEGIN{inblk=0}
 {
@@ -87,8 +54,7 @@ BEGIN{inblk=0}
   if(inblk){
     buf=buf $0 ORS
     if($0 ~ /^\}/){
-      if(buf ~ "ssid=\""ssid"\""){next} # ganzen Block verwerfen
-      else{printf "%s", buf}
+      if(buf ~ "ssid=\""ssid"\""){next} else {printf "%s", buf}
       inblk=0; buf=""
     }
     next
@@ -96,7 +62,6 @@ BEGIN{inblk=0}
   print
 }
 END{
-  # neuen Block anhängen
   print ""
   print "network={"
   print "    ssid=\""ssid"\""
@@ -104,24 +69,35 @@ END{
   print "}"
 }' "$WPA_FILE" > "${WPA_FILE}.tmp" && mv "${WPA_FILE}.tmp" "$WPA_FILE"
 
-# wpa_supplicant starten/neu laden (nur für wlan0 relevant)
-start_wpa
-# Neu verbinden
-if have wpa_cli; then wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true; fi
+# 3) wpa_supplicant für wlan0 starten/neu laden
+systemctl start wpa_supplicant >/dev/null 2>&1 || systemctl start "wpa_supplicant@$IFACE" >/dev/null 2>&1 || true
+have wpa_cli && wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true
 
-# DHCP nur für wlan0 anstoßen
-kick_dhcpcd_wlan
+# 4) DHCP für wlan0 nudgen
+have dhcpcd && { dhcpcd -x "$IFACE" >/dev/null 2>&1 || true; dhcpcd -n "$IFACE" >/dev/null 2>&1 || true; }
 
-# Auf IP warten
-if wait_ip; then
-  ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
-  log "[+] Erfolgreich mit \"$SSID\" verbunden."
-  log "    WLAN-IP: ${WLAN_IP}"
-  [ -n "$ETH_IP" ] && log "    LAN-IP:  ${ETH_IP}"
+# 5) Auf IP warten + letzter Fallback
+for i in {1..10}; do
+  WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
+  [ -n "$WLAN_IP" ] && break
+  sleep 1
+done
+if [ -z "$WLAN_IP" ]; then
+  # letzter Notanker (optional, falls installiert)
+  have dhclient && dhclient -v "$IFACE" || true
+  sleep 2
+  WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
+fi
+
+ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
+
+if [ -n "$WLAN_IP" ]; then
+  echo "[+] Erfolgreich mit \"$SSID\" verbunden."
+  echo "    WLAN-IP: $WLAN_IP"
+  [ -n "$ETH_IP" ] && echo "    LAN-IP:  $ETH_IP"
   exit 0
 else
-  ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
-  log "[!] Keine WLAN-IP erhalten (SSID/PW ok?)."
-  [ -n "$ETH_IP" ] && log "    LAN-IP (eth0, unverändert): ${ETH_IP}"
+  echo "[!] Keine WLAN-IP erhalten."
+  [ -n "$ETH_IP" ] && echo "    LAN-IP (eth0, unverändert): $ETH_IP"
   exit 2
 fi
