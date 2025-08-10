@@ -1,5 +1,5 @@
 #!/bin/bash
-# Startet AP auf wlan0 (SSID/PW: dmscreen/dmscreen) via hostapd + dnsmasq-Snippet. eth0 bleibt unberührt.
+# start-ap.sh – startet AP auf wlan0 (SSID/PW: dmscreen/dmscreen) via hostapd + dnsmasq-Snippet
 
 SSID="dmscreen"
 PASS="dmscreen"
@@ -9,20 +9,19 @@ HOSTAPD_CONF="/etc/hostapd/hostapd.conf"
 DNSMASQ_SNIPPET="/etc/dnsmasq.d/dmscreen.conf"
 DEFAULT_HOSTAPD="/etc/default/hostapd"
 
-have(){ command -v "$1" >/dev/null 2>&1; }
-svc_active(){ systemctl is-active --quiet "$1"; }
-
 [ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }
-have hostapd || { echo "[!] hostapd fehlt. Installiere: sudo apt-get install -y hostapd"; exit 1; }
-have dnsmasq || { echo "[!] dnsmasq fehlt. Installiere: sudo apt-get install -y dnsmasq"; exit 1; }
+command -v hostapd >/dev/null 2>&1 || { echo "[!] hostapd fehlt: sudo apt-get install -y hostapd"; exit 1; }
+command -v dnsmasq >/dev/null 2>&1 || { echo "[!] dnsmasq fehlt: sudo apt-get install -y dnsmasq"; exit 1; }
 
-echo "[*] Starte AP \"$SSID\" ..."
+echo "[*] Starte AP \"$SSID\"..."
 
 # Client-Dienste auf wlan0 stoppen
-systemctl stop wpa_supplicant >/dev/null 2>&1 || systemctl stop "wpa_supplicant@$IFACE" >/dev/null 2>&1 || true
-have dhcpcd && dhcpcd -x "$IFACE" >/dev/null 2>&1 || true
+systemctl stop wpa_supplicant >/dev/null 2>&1 || true
+systemctl stop "wpa_supplicant@$IFACE" >/dev/null 2>&1 || true
+dhclient -r "$IFACE" >/dev/null 2>&1 || true
+pkill -f "dhclient.*$IFACE" >/dev/null 2>&1 || true
 
-# WLAN entsperren, hochfahren, IP setzen
+# WLAN hoch + statische AP-IP
 rfkill unblock wifi 2>/dev/null || true
 ip link set "$IFACE" up 2>/dev/null || true
 ip addr flush dev "$IFACE" 2>/dev/null || true
@@ -47,7 +46,7 @@ rsn_pairwise=CCMP
 country_code=DE
 EOF
 
-# hostapd default-config Zeiger setzen
+# /etc/default/hostapd auf unsere Config zeigen lassen
 if [ -f "$DEFAULT_HOSTAPD" ]; then
   if grep -q '^DAEMON_CONF=' "$DEFAULT_HOSTAPD"; then
     sed -i "s|^DAEMON_CONF=.*|DAEMON_CONF=\"$HOSTAPD_CONF\"|" "$DEFAULT_HOSTAPD"
@@ -56,31 +55,27 @@ if [ -f "$DEFAULT_HOSTAPD" ]; then
   fi
 fi
 
-# dnsmasq-Snippet (anstatt globale dnsmasq.conf)
+# dnsmasq-Snippet anlegen (statt globale dnsmasq.conf zu überschreiben)
 cat > "$DNSMASQ_SNIPPET" <<EOF
 interface=$IFACE
 bind-interfaces
 dhcp-range=192.168.4.10,192.168.4.200,255.255.255.0,24h
 EOF
 
-# dnsmasq reload/start
-if svc_active dnsmasq; then
-  systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null 2>&1 || true
-else
-  systemctl start dnsmasq >/dev/null 2>&1 || true
-fi
+# dnsmasq neu laden/starten
+systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null 2>&1 || systemctl start dnsmasq >/dev/null 2>&1 || true
 
 # hostapd starten
 systemctl unmask hostapd >/dev/null 2>&1 || true
 systemctl start hostapd
 
 sleep 1
-if svc_active hostapd; then
+if systemctl is-active --quiet hostapd; then
   WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
   ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
   echo "[+] AP aktiv. SSID: \"$SSID\"  Passwort: \"$PASS\""
   echo "    AP-IP (wlan0): ${WLAN_IP:-192.168.4.1}"
-  [ -n "$ETH_IP" ] && echo "    LAN-IP (eth0, unverändert): $ETH_IP"
+  [ -n "$ETH_IP" ] && echo "    LAN-IP (eth0): $ETH_IP"
 else
   echo "[!] hostapd konnte nicht gestartet werden. Logs: journalctl -u hostapd -b"
   exit 2
