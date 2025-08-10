@@ -278,7 +278,10 @@ def create_adhoc_network():
 
 
 def _write_wpa_supplicant(networks):
-    """Write /etc/wpa_supplicant/wpa_supplicant.conf with multiple networks"""
+    """Write wpa_supplicant configs. On Debian/RPi, wpa_supplicant@wlan0 reads
+    /etc/wpa_supplicant/wpa_supplicant-wlan0.conf, so we write both that file
+    and the generic /etc/wpa_supplicant/wpa_supplicant.conf to keep them in sync.
+    """
     try:
         pr_list = []
         for prio, net in enumerate(networks, start=1):
@@ -301,9 +304,20 @@ country=DE
             f"network={{\n    ssid=\"{ssid}\"\n    psk=\"{psk}\"\n    key_mgmt=WPA-PSK\n    priority={prio}\n}}\n"
         )
     content = header + ''.join(blocks)
+    # Ensure target directory exists
+    try:
+        if not os.path.exists('/etc/wpa_supplicant'):
+            _dbg("/etc/wpa_supplicant existiert nicht – lege an …")
+            _run_cmd(['sudo', 'mkdir', '-p', '/etc/wpa_supplicant'], check=True)
+    except Exception as e:
+        _dbg(f"Warnung: konnte /etc/wpa_supplicant nicht prüfen/anlegen: {type(e).__name__}: {e}")
+    # Write temp file then move to generic path
     with open('wpa_supplicant.conf.tmp', 'w', encoding='utf-8') as f:
         f.write(content)
     _run_cmd(['sudo', 'mv', 'wpa_supplicant.conf.tmp', '/etc/wpa_supplicant/wpa_supplicant.conf'], check=True)
+    # Also copy to the interface-specific config used by wpa_supplicant@wlan0
+    _dbg("Kopiere Konfiguration nach /etc/wpa_supplicant/wpa_supplicant-wlan0.conf …")
+    _run_cmd(['sudo', 'cp', '/etc/wpa_supplicant/wpa_supplicant.conf', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'], check=True)
 
 
 def _wpa_ping() -> bool:
@@ -338,7 +352,8 @@ def _ensure_wpa_running() -> bool:
         return True
 
     _dbg("Starte wpa_supplicant manuell im Hintergrund …")
-    _run_cmd(['sudo', 'wpa_supplicant', '-B', '-i', 'wlan0', '-c', '/etc/wpa_supplicant/wpa_supplicant.conf'])
+    # Use the interface-specific config common on Debian/RPi
+    _run_cmd(['sudo', 'wpa_supplicant', '-B', '-i', 'wlan0', '-c', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
     time.sleep(1)
     ok = _wpa_ping()
     _dbg(f"wpa_supplicant manuell gestartet -> {'OK' if ok else 'FEHLER'}")
@@ -355,12 +370,12 @@ def _reconfigure_wpa():
     res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
     ok = (res.returncode == 0) and ('FAIL' not in (((res.stdout or '') + ' ' + (res.stderr or '')).upper()))
     if not ok:
-        _dbg("wpa_cli reconfigure war nicht erfolgreich – versuche wpa_supplicant neu zu starten und erneut zu konfigurieren …")
-        try:
-            _ensure_wpa_running()
-        except Exception as e:
-            _dbg(f"Fehler bei _ensure_wpa_running (Retry): {type(e).__name__}: {e}")
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+        _dbg("wpa_cli reconfigure war nicht erfolgreich – starte wpa_supplicant@wlan0 neu und versuche erneut …")
+        _run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
+        time.sleep(1)
+        res2 = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+        ok2 = (res2.returncode == 0) and ('FAIL' not in (((res2.stdout or '') + ' ' + (res2.stderr or '')).upper()))
+        _dbg(f"wpa_cli reconfigure (Retry) -> {'ERFOLG' if ok2 else 'FEHLER'}")
 
 
 
@@ -447,6 +462,10 @@ def _forget_network_everywhere(ssid: str):
 def _scan_visible_ssids():
     """Return a set of visible SSIDs using iw or iwlist (Debian/Raspberry Pi)."""
     _dbg("Scanne sichtbare WLANs (primär: iw scan, Fallback: iwlist) …")
+    # If AP is active, scanning will often fail with 'Device or resource busy'
+    if check_adhoc_network(force=True):
+        _dbg("AP aktiv – WLAN-Scan übersprungen (Interface belegt durch hostapd).")
+        return set()
     ssids = set()
     # Try iw dev wlan0 scan
     res = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
