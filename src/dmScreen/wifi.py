@@ -318,6 +318,12 @@ country=DE
     # Also copy to the interface-specific config used by wpa_supplicant@wlan0
     _dbg("Kopiere Konfiguration nach /etc/wpa_supplicant/wpa_supplicant-wlan0.conf …")
     _run_cmd(['sudo', 'cp', '/etc/wpa_supplicant/wpa_supplicant.conf', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'], check=True)
+    # Ensure secure ownership and permissions (required by wpa_supplicant)
+    _dbg("Setze Besitzer und Berechtigungen (root:root, 600) für wpa_supplicant Konfigurationsdateien …")
+    _run_cmd(['sudo', 'chown', 'root:root', '/etc/wpa_supplicant/wpa_supplicant.conf'])
+    _run_cmd(['sudo', 'chmod', '600', '/etc/wpa_supplicant/wpa_supplicant.conf'])
+    _run_cmd(['sudo', 'chown', 'root:root', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
+    _run_cmd(['sudo', 'chmod', '600', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
 
 
 def _wpa_ping() -> bool:
