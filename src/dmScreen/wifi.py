@@ -213,47 +213,6 @@ def _start_ap_services():
     _run_script('start-ap.sh')
 
 
-def _write_hostapd_and_dnsmasq():
-    """Write configs for hostapd and dnsmasq for AP SSID/password 'dmscreen'"""
-    _dbg("Erzeuge AP-Konfigurationen (hostapd/dnsmasq) für SSID 'dmscreen' …")
-    hostapd_conf = """interface=wlan0
-ssid=dmscreen
-hw_mode=g
-channel=7
-wmm_enabled=0
-macaddr_acl=0
-auth_algs=1
-ignore_broadcast_ssid=0
-wpa=2
-wpa_passphrase=dmscreen
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=TKIP
-rsn_pairwise=CCMP
-"""
-    dnsmasq_conf = """interface=wlan0
-dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
-"""
-    try:
-        # Ensure dirs
-        if not os.path.exists('/etc/hostapd'):
-            _dbg("/etc/hostapd existiert nicht – lege an …")
-            _run_cmd(['sudo', 'mkdir', '-p', '/etc/hostapd'], check=True)
-        # Write temp files then move with sudo mv
-        _dbg("Schreibe hostapd.conf.tmp und verschiebe nach /etc/hostapd/hostapd.conf …")
-        with open('hostapd.conf.tmp', 'w', encoding='utf-8') as f:
-            f.write(hostapd_conf)
-        _run_cmd(['sudo', 'mv', 'hostapd.conf.tmp', '/etc/hostapd/hostapd.conf'], check=True)
-
-        _dbg("Schreibe dnsmasq.conf.tmp und verschiebe nach /etc/dnsmasq.conf …")
-        with open('dnsmasq.conf.tmp', 'w', encoding='utf-8') as f:
-            f.write(dnsmasq_conf)
-        _run_cmd(['sudo', 'mv', 'dnsmasq.conf.tmp', '/etc/dnsmasq.conf'], check=True)
-        _dbg("AP-Konfigurationsdateien erfolgreich geschrieben.")
-        return True
-    except Exception as e:
-        _dbg(f"Fehler beim Schreiben der AP-Konfigurationen: {type(e).__name__}: {e}")
-        return False
-
 
 def create_adhoc_network():
     """Create an ad-hoc AP if no WiFi connected by invoking start-ap.sh."""
@@ -379,78 +338,6 @@ def _reconfigure_wpa():
 
 
 
-def _select_network(ssid: str) -> bool:
-    """Select a network by SSID via wpa_cli if present in runtime config."""
-    try:
-        _dbg(f"Suche Netzwerk in wpa_cli list_networks für SSID '{ssid}' …")
-        res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
-        if res.returncode != 0 or not res.stdout:
-            _dbg("wpa_cli list_networks ohne Ergebnis – Auswahl nicht möglich.")
-            return False
-        for line in res.stdout.splitlines():
-            line = line.strip()
-            if not line or line.lower().startswith('network id'):
-                continue
-            parts = [p for p in line.split('\t') if p != '']
-            if len(parts) < 2:
-                parts = [p for p in line.split() if p != '']
-            if len(parts) >= 2:
-                nid = parts[0].strip()
-                s = parts[1].strip()
-                if s == ssid:
-                    _dbg(f"SSID in Runtime-Konfiguration gefunden (network_id={nid}). Wähle Netzwerk und assoziiere neu …")
-                    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'select_network', nid])
-                    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reassociate'])
-                    return True
-        _dbg("SSID wurde in wpa_cli list_networks nicht gefunden.")
-        return False
-    except Exception as e:
-        _dbg(f"_select_network Ausnahme: {type(e).__name__}: {e}")
-        return False
-
-
-def _ensure_network_present(ssid: str, password: str | None) -> bool:
-    """Ensure the target SSID exists in wpa_supplicant runtime networks.
-    If absent, add and configure it via wpa_cli.
-    Returns True if the network exists or was added successfully.
-    """
-    try:
-        # Check existing networks
-        res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
-        if res.returncode == 0 and res.stdout:
-            for line in res.stdout.splitlines():
-                line = line.strip()
-                if not line or line.lower().startswith('network id'):
-                    continue
-                parts = [p for p in line.split('\t') if p]
-                if len(parts) < 2:
-                    parts = [p for p in line.split() if p]
-                if len(parts) >= 2 and parts[1].strip() == ssid:
-                    _dbg(f"_ensure_network_present: SSID '{ssid}' bereits vorhanden (network_id={parts[0].strip()}).")
-                    return True
-        _dbg(f"_ensure_network_present: Füge SSID '{ssid}' zur Runtime hinzu …")
-        # Add new network
-        add_res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'add_network'])
-        if add_res.returncode != 0 or not (add_res.stdout or '').strip():
-            _dbg("add_network fehlgeschlagen.")
-            return False
-        nid = (add_res.stdout or '').strip().split()[0]
-        # Set SSID
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'set_network', nid, 'ssid', f'"{ssid}"'])
-        if password:
-            _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'set_network', nid, 'psk', f'"{password}"'])
-        else:
-            _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'set_network', nid, 'key_mgmt', 'NONE'])
-        # Enable and select
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'enable_network', nid])
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'select_network', nid])
-        # Save configuration to persist
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'save_config'])
-        _dbg(f"_ensure_network_present: Netzwerk network_id={nid} konfiguriert und ausgewählt.")
-        return True
-    except Exception as e:
-        _dbg(f"_ensure_network_present Ausnahme: {type(e).__name__}: {e}")
-        return False
 
 
 def _os_forget_network_wpa(ssid: str):
@@ -698,7 +585,7 @@ def register_wifi_routes(app, on_change=None):
             _dbg("API /api/wifi/configure: fehlende Felder -> 400")
             return jsonify({'error': 'SSID and password are required'}), 400
         success = configure_wifi(ssid, password)
-        if success and on_change:
+        if on_change:
             try:
                 on_change()
             except Exception:
@@ -768,8 +655,9 @@ def register_wifi_routes(app, on_change=None):
     def api_disconnect():
         _dbg("API POST /api/wifi/disconnect …")
         success, ssid = disconnect_and_forget_current()
+        create_adhoc_network()
         _dbg(f"API /api/wifi/disconnect Ergebnis: success={success} | entfernte SSID={ssid}")
-        if success and on_change:
+        if on_change:
             try:
                 on_change()
             except Exception:
