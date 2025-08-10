@@ -44,6 +44,9 @@ _cached_adhoc_ts = 0.0
 _WIFI_POLL_INTERVAL = float(os.getenv('DM_WIFI_POLL_INTERVAL', '5'))  # seconds
 _WIFI_POLL_TRIES = int(os.getenv('DM_WIFI_POLL_TRIES', '10'))
 
+# Control whether we temporarily pause AP to perform scans (helps when interface is busy)
+_WIFI_SCAN_PAUSE_AP = not (os.getenv('DM_WIFI_SCAN_PAUSE_AP', '1').lower() in ('0', 'false', 'no', 'off', ''))
+
 # -----------------------------
 # Helpers for known networks
 # -----------------------------
@@ -130,6 +133,13 @@ def _run_cmd(args, check=False):
         return subprocess.CompletedProcess(args=args, returncode=1, stdout='', stderr=str(e))
 
 
+def _run_script(script_name: str, *script_args):
+    """Helper to run one of the provided WiFi/AP scripts located at project root with sudo."""
+    script_path = os.path.join(_PROJECT_ROOT, script_name)
+    cmd = ['sudo', script_path, *[str(a) for a in script_args]]
+    return _run_cmd(cmd)
+
+
 # WiFi-related functions
 
 def check_wifi_connection():
@@ -194,20 +204,13 @@ def check_adhoc_network(force: bool = False):
 
 
 def _stop_ap_services():
-    _dbg("Stoppe AP-Dienste: hostapd und dnsmasq …")
-    _run_cmd(['sudo', 'systemctl', 'stop', 'hostapd', 'dnsmasq'])
+    _dbg("Stoppe AP über Skript stop-ap.sh …")
+    _run_script('stop-ap.sh')
 
 
 def _start_ap_services():
-    _dbg("Starte AP-Dienste: hostapd und dnsmasq …")
-    res = _run_cmd(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
-    if res.returncode != 0:
-        err = (res.stderr or '').lower()
-        if 'masked' in err:
-            _dbg("hostapd ist maskiert – versuche Unmask und erneuten Start …")
-            _run_cmd(['sudo', 'systemctl', 'unmask', 'hostapd'])
-            _run_cmd(['sudo', 'systemctl', 'enable', 'hostapd'])
-            _run_cmd(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
+    _dbg("Starte AP über Skript start-ap.sh …")
+    _run_script('start-ap.sh')
 
 
 def _write_hostapd_and_dnsmasq():
@@ -253,20 +256,10 @@ dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
 
 
 def create_adhoc_network():
-    """Create an ad-hoc AP if no WiFi connected. SSID/PW = dmscreen/dmscreen"""
+    """Create an ad-hoc AP if no WiFi connected by invoking start-ap.sh."""
     try:
-        _dbg("Starte Erstellung des Ad-hoc-Netzwerks 'dmscreen' …")
-        _stop_ap_services()
-        ok = _write_hostapd_and_dnsmasq()
-        _dbg("Setze statische IP auf wlan0: 192.168.4.1/24 …")
-        # Set static IP on wlan0 for AP network
-        _run_cmd(['sudo', 'ifconfig', 'wlan0', '192.168.4.1', 'netmask', '255.255.255.0'])
-        if ok:
-            _dbg("Konfigurationsdateien ok – starte AP-Dienste …")
-            _start_ap_services()
-        else:
-            _dbg("Konfigurationsdateien NICHT erstellt – Dienste werden nicht gestartet.")
-        # Wait briefly and verify
+        _dbg("Starte Erstellung/Start des Ad-hoc-Netzwerks via start-ap.sh …")
+        _start_ap_services()
         _dbg("Warte 2s und prüfe dann den AP-Status …")
         time.sleep(2)
         is_active = check_adhoc_network(force=True)
@@ -416,6 +409,50 @@ def _select_network(ssid: str) -> bool:
         return False
 
 
+def _ensure_network_present(ssid: str, password: str | None) -> bool:
+    """Ensure the target SSID exists in wpa_supplicant runtime networks.
+    If absent, add and configure it via wpa_cli.
+    Returns True if the network exists or was added successfully.
+    """
+    try:
+        # Check existing networks
+        res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if not line or line.lower().startswith('network id'):
+                    continue
+                parts = [p for p in line.split('\t') if p]
+                if len(parts) < 2:
+                    parts = [p for p in line.split() if p]
+                if len(parts) >= 2 and parts[1].strip() == ssid:
+                    _dbg(f"_ensure_network_present: SSID '{ssid}' bereits vorhanden (network_id={parts[0].strip()}).")
+                    return True
+        _dbg(f"_ensure_network_present: Füge SSID '{ssid}' zur Runtime hinzu …")
+        # Add new network
+        add_res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'add_network'])
+        if add_res.returncode != 0 or not (add_res.stdout or '').strip():
+            _dbg("add_network fehlgeschlagen.")
+            return False
+        nid = (add_res.stdout or '').strip().split()[0]
+        # Set SSID
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'set_network', nid, 'ssid', f'"{ssid}"'])
+        if password:
+            _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'set_network', nid, 'psk', f'"{password}"'])
+        else:
+            _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'set_network', nid, 'key_mgmt', 'NONE'])
+        # Enable and select
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'enable_network', nid])
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'select_network', nid])
+        # Save configuration to persist
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'save_config'])
+        _dbg(f"_ensure_network_present: Netzwerk network_id={nid} konfiguriert und ausgewählt.")
+        return True
+    except Exception as e:
+        _dbg(f"_ensure_network_present Ausnahme: {type(e).__name__}: {e}")
+        return False
+
+
 def _os_forget_network_wpa(ssid: str):
     """Remove matching SSID networks from wpa_supplicant runtime and save config."""
     try:
@@ -468,44 +505,58 @@ def _forget_network_everywhere(ssid: str):
 def _scan_visible_ssids():
     """Return a set of visible SSIDs using iw or iwlist (Debian/Raspberry Pi)."""
     _dbg("Scanne sichtbare WLANs (primär: iw scan, Fallback: iwlist) …")
-    # If AP is active, scanning will often fail with 'Device or resource busy'
-    if check_adhoc_network(force=True):
+
+    def _do_scan() -> set:
+        ssids_local = set()
+        res_local = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
+        if res_local.returncode == 0 and res_local.stdout:
+            _dbg("Nutze Ergebnisse von 'iw dev wlan0 scan' …")
+            for line in res_local.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('SSID:'):
+                    name = line.split('SSID:', 1)[1].strip()
+                    if name:
+                        ssids_local.add(name)
+            _dbg(f"Gefundene SSIDs via iw: {sorted(list(ssids_local))}")
+        else:
+            _dbg("'iw dev wlan0 scan' lieferte keine verwertbaren Daten – Fallback auf 'iwlist wlan0 scanning' …")
+            res_fallback = _run_cmd(['iwlist', 'wlan0', 'scanning'])
+            if res_fallback.returncode == 0 and res_fallback.stdout:
+                for line in res_fallback.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith('ESSID:'):
+                        name = line.split('ESSID:', 1)[1].strip().strip('"')
+                        if name:
+                            ssids_local.add(name)
+                _dbg(f"Gefundene SSIDs via iwlist: {sorted(list(ssids_local))}")
+            else:
+                _dbg("Auch 'iwlist' lieferte keine SSIDs.")
+        return ssids_local
+
+    ap_active = check_adhoc_network(force=True)
+    if ap_active and _WIFI_SCAN_PAUSE_AP:
+        _dbg("AP aktiv – pausiere AP kurz für Scan …")
+        _stop_ap_services()
+        time.sleep(0.5)
+        try:
+            ssids = _do_scan()
+        finally:
+            _start_ap_services()
+        _dbg(f"Scan abgeschlossen. SSIDs gesamt: {len(ssids)}")
+        return ssids
+    elif ap_active:
         _dbg("AP aktiv – WLAN-Scan übersprungen (Interface belegt durch hostapd).")
         return set()
-    ssids = set()
-    # Try iw dev wlan0 scan
-    res = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
-    if res.returncode == 0 and res.stdout:
-        _dbg("Nutze Ergebnisse von 'iw dev wlan0 scan' …")
-        for line in res.stdout.splitlines():
-            line = line.strip()
-            if line.startswith('SSID:'):
-                name = line.split('SSID:', 1)[1].strip()
-                if name:
-                    ssids.add(name)
-        _dbg(f"Gefundene SSIDs via iw: {sorted(list(ssids))}")
-    else:
-        _dbg("'iw dev wlan0 scan' lieferte keine verwertbaren Daten – Fallback auf 'iwlist wlan0 scanning' …")
-        # Fallback to iwlist
-        res2 = _run_cmd(['iwlist', 'wlan0', 'scanning'])
-        if res2.returncode == 0 and res2.stdout:
-            for line in res2.stdout.splitlines():
-                line = line.strip()
-                if line.startswith('ESSID:'):
-                    name = line.split('ESSID:', 1)[1].strip().strip('"')
-                    if name:
-                        ssids.add(name)
-            _dbg(f"Gefundene SSIDs via iwlist: {sorted(list(ssids))}")
-        else:
-            _dbg("Auch 'iwlist' lieferte keine SSIDs.")
+
+    ssids = _do_scan()
     _dbg(f"Scan abgeschlossen. SSIDs gesamt: {len(ssids)}")
     return ssids
 
 
 def connect_best_known_network():
-    """Try to connect to the best available known network based on scan results"""
+    """Try to connect to the best available known network using connect-wifi.sh; if none visible, caller can start AP."""
     try:
-        _dbg("Beginne Versuch: Verbindung zum besten bekannten Netzwerk …")
+        _dbg("Beginne Versuch: Verbindung zum besten bekannten Netzwerk via Skript …")
         known = _load_known_networks()
         _dbg(f"Bekannte Netzwerke: {len(known)} -> {[n.get('ssid') for n in known]}")
         if not known:
@@ -522,52 +573,35 @@ def connect_best_known_network():
         if not candidates:
             _dbg("Keine Kandidaten – Abbruch.")
             return False
-        # Prefer order in the stored list (latest wins at higher priority)
-        _dbg("Stoppe ggf. AP-Dienste und schreibe wpa_supplicant mit Kandidaten …")
+        # Stop AP and try candidates in order
         _stop_ap_services()
-        _write_wpa_supplicant(candidates)
-        # Ensure wpa_supplicant is running before reconfigure
-        try:
-            _ensure_wpa_running()
-        except Exception as e:
-            _dbg(f"Warnung: _ensure_wpa_running in connect_best_known_network: {type(e).__name__}: {e}")
-        _reconfigure_wpa()
-        _dbg("Warte 8s auf Verbindungsaufbau …")
-        time.sleep(8)
-        cur_ssid = current_ssid(force=True)
-        connected = cur_ssid is not None
-        _dbg(f"Ergebnis Verbindungsversuch: {'verbunden' if connected else 'nicht verbunden'} | SSID={cur_ssid}")
-        return connected
+        for net in candidates:
+            ssid = net.get('ssid')
+            pwd = net.get('password') or ''
+            _dbg(f"Versuche Verbindung mit '{ssid}' über connect-wifi.sh …")
+            _run_script('connect-wifi.sh', ssid, pwd)
+            # Poll a few times quickly
+            for i in range(6):
+                cur = current_ssid(force=True)
+                if cur == ssid:
+                    _dbg(f"Erfolgreich verbunden mit '{ssid}'.")
+                    return True
+                time.sleep(2)
+            _dbg(f"Konnte nicht mit '{ssid}' verbinden – probiere nächsten Kandidaten …")
+        _dbg("Keine Verbindung zu Kandidaten möglich.")
+        return False
     except Exception as e:
         _dbg(f"connect_best_known_network Fehler: {type(e).__name__}: {e}")
         return False
 
 
 def configure_wifi(ssid, password):
-    """Configure WiFi: persist credentials and attempt to connect"""
+    """Configure WiFi via scripts: stop AP, connect to SSID with password, and persist credentials."""
     try:
-        _dbg(f"Konfiguriere WLAN: gewünschte SSID='{ssid}' …")
+        _dbg(f"Konfiguriere WLAN via Skript: gewünschte SSID='{ssid}' …")
         add_known_network(ssid, password)
-        # Write full known list to wpa_supplicant
-        networks = _load_known_networks()
-        _dbg(f"Schreibe vollständige Known-Liste in wpa_supplicant (Anzahl={len(networks)}) …")
         _stop_ap_services()
-        _write_wpa_supplicant(networks)
-
-        # wpa_supplicant control
-        try:
-            _ensure_wpa_running()
-        except Exception as e:
-            _dbg(f"Warnung: _ensure_wpa_running in configure_wifi: {type(e).__name__}: {e}")
-        _reconfigure_wpa()
-        # Try to actively select the desired network
-        selected = _select_network(ssid)
-        _dbg(f"_select_network('{ssid}') -> {selected}")
-        # Ensure reassociation in case driver is idle
-        _dbg("Stelle wpa_cli reconnect her …")
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconnect'])
-
-        # Poll for connection using configured cadence
+        _run_script('connect-wifi.sh', ssid, password)
         _dbg(f"Starte Polling (max {_WIFI_POLL_TRIES * _WIFI_POLL_INTERVAL:.0f}s, Intervall={_WIFI_POLL_INTERVAL}s) auf Ziel-SSID …")
         for i in range(_WIFI_POLL_TRIES):
             cur = current_ssid(force=True)
@@ -584,22 +618,13 @@ def configure_wifi(ssid, password):
 
 
 def disconnect_and_forget_current():
-    """Disconnect from the currently connected WiFi and forget it from known networks.
-    Returns (success, ssid)."""
+    """Disconnect from the currently connected WiFi using forget-wifi.sh, update known list, and start AP. Returns (success, ssid)."""
     try:
-        _dbg("Starte Disconnect und Vergessen des aktuellen WLANs …")
+        _dbg("Starte Disconnect via Skript und Entfernen des aktuellen WLANs …")
         ssid = current_ssid(force=True)
         _dbg(f"Aktueller Zustand vor Disconnect: SSID={ssid}")
-        # Proactively remove the network from OS runtime configs so it won't reconnect
-        if ssid:
-            try:
-                removed_runtime = _forget_network_everywhere(ssid)
-                _dbg(f"Runtime-Forget Ergebnis für SSID '{ssid}': {removed_runtime}")
-            except Exception as e:
-                _dbg(f"Fehler beim Runtime-Forget: {type(e).__name__}: {e}")
-        # Attempt to disconnect regardless of state
-        _dbg("Sende wpa_cli disconnect …")
-        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'disconnect'])
+        # Call forget script (may fail if not connected; ignore rc)
+        _run_script('forget-wifi.sh')
         # Remove from known networks if present
         if ssid:
             try:
@@ -607,15 +632,9 @@ def disconnect_and_forget_current():
                 _dbg(f"Entferne aus Known-Liste: ssid='{ssid}' -> removed={removed_known}")
             except Exception as e:
                 _dbg(f"Fehler beim Entfernen aus Known-Liste: {type(e).__name__}: {e}")
-        # Rewrite wpa_supplicant based on remaining networks and reconfigure
-        try:
-            nets = _load_known_networks()
-            _dbg(f"Schreibe wpa_supplicant nach Disconnect mit {len(nets)} verbleibenden Netzwerken …")
-            _write_wpa_supplicant(nets)
-            _reconfigure_wpa()
-        except Exception as e:
-            _dbg(f"Error updating wpa_supplicant during disconnect: {type(e).__name__}: {e}")
-        time.sleep(3)
+        # Start AP so user can reconnect/configure
+        _start_ap_services()
+        time.sleep(2)
         _dbg("Disconnect abgeschlossen.")
         return True, ssid
     except Exception as e:
