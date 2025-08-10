@@ -2,7 +2,7 @@
 
 # Install the package from Git repository
 git pull
-uv sync
+/home/pi/.local/bin/uv sync
 
 # Run the dmScreen server
-uv run dmScreen-server
+/home/pi/.local/bin/uv run dmScreen-server
