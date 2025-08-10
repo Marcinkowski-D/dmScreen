@@ -40,6 +40,10 @@ _cached_ssid_ts = 0.0
 _cached_adhoc = None  # bool or None
 _cached_adhoc_ts = 0.0
 
+# Polling configuration for connection attempts
+_WIFI_POLL_INTERVAL = float(os.getenv('DM_WIFI_POLL_INTERVAL', '5'))  # seconds
+_WIFI_POLL_TRIES = int(os.getenv('DM_WIFI_POLL_TRIES', '10'))
+
 # -----------------------------
 # Helpers for known networks
 # -----------------------------
@@ -196,7 +200,14 @@ def _stop_ap_services():
 
 def _start_ap_services():
     _dbg("Starte AP-Dienste: hostapd und dnsmasq …")
-    _run_cmd(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
+    res = _run_cmd(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
+    if res.returncode != 0:
+        err = (res.stderr or '').lower()
+        if 'masked' in err:
+            _dbg("hostapd ist maskiert – versuche Unmask und erneuten Start …")
+            _run_cmd(['sudo', 'systemctl', 'unmask', 'hostapd'])
+            _run_cmd(['sudo', 'systemctl', 'enable', 'hostapd'])
+            _run_cmd(['sudo', 'systemctl', 'start', 'hostapd', 'dnsmasq'])
 
 
 def _write_hostapd_and_dnsmasq():
@@ -295,9 +306,61 @@ country=DE
     _run_cmd(['sudo', 'mv', 'wpa_supplicant.conf.tmp', '/etc/wpa_supplicant/wpa_supplicant.conf'], check=True)
 
 
+def _wpa_ping() -> bool:
+    """Return True if wpa_cli can reach wpa_supplicant (expects 'PONG')."""
+    _dbg("Prüfe Erreichbarkeit von wpa_supplicant (wpa_cli ping) …")
+    res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'ping'])
+    ok = (res.returncode == 0) and ('PONG' in (res.stdout or ''))
+    _dbg(f"wpa_cli ping -> {'OK' if ok else 'NICHT ERREICHBAR'}")
+    return ok
+
+
+def _ensure_wpa_running() -> bool:
+    """Make sure wpa_supplicant for wlan0 is running and its control socket is reachable."""
+    _dbg("Stelle sicher, dass wpa_supplicant für wlan0 läuft …")
+    if _wpa_ping():
+        _dbg("wpa_supplicant bereits erreichbar.")
+        return True
+    _dbg("Versuche rfkill unblock und Interface hochzufahren …")
+    _run_cmd(['sudo', 'rfkill', 'unblock', 'all'])
+    _run_cmd(['sudo', 'ifconfig', 'wlan0', 'up'])
+
+    _dbg("Starte Dienst neu: wpa_supplicant@wlan0 …")
+    _run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
+    time.sleep(1)
+    if _wpa_ping():
+        return True
+
+    _dbg("Starte generischen Dienst neu: wpa_supplicant …")
+    _run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant'])
+    time.sleep(1)
+    if _wpa_ping():
+        return True
+
+    _dbg("Starte wpa_supplicant manuell im Hintergrund …")
+    _run_cmd(['sudo', 'wpa_supplicant', '-B', '-i', 'wlan0', '-c', '/etc/wpa_supplicant/wpa_supplicant.conf'])
+    time.sleep(1)
+    ok = _wpa_ping()
+    _dbg(f"wpa_supplicant manuell gestartet -> {'OK' if ok else 'FEHLER'}")
+    return ok
+
+
 def _reconfigure_wpa():
     _dbg("wpa_cli reconfigure …")
-    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+    # Ensure wpa_supplicant control socket is available
+    try:
+        _ensure_wpa_running()
+    except Exception as e:
+        _dbg(f"Fehler bei _ensure_wpa_running vor reconfigure: {type(e).__name__}: {e}")
+    res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+    ok = (res.returncode == 0) and ('FAIL' not in (((res.stdout or '') + ' ' + (res.stderr or '')).upper()))
+    if not ok:
+        _dbg("wpa_cli reconfigure war nicht erfolgreich – versuche wpa_supplicant neu zu starten und erneut zu konfigurieren …")
+        try:
+            _ensure_wpa_running()
+        except Exception as e:
+            _dbg(f"Fehler bei _ensure_wpa_running (Retry): {type(e).__name__}: {e}")
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
 
 
 
@@ -438,6 +501,11 @@ def connect_best_known_network():
         _dbg("Stoppe ggf. AP-Dienste und schreibe wpa_supplicant mit Kandidaten …")
         _stop_ap_services()
         _write_wpa_supplicant(candidates)
+        # Ensure wpa_supplicant is running before reconfigure
+        try:
+            _ensure_wpa_running()
+        except Exception as e:
+            _dbg(f"Warnung: _ensure_wpa_running in connect_best_known_network: {type(e).__name__}: {e}")
         _reconfigure_wpa()
         _dbg("Warte 8s auf Verbindungsaufbau …")
         time.sleep(8)
@@ -462,6 +530,10 @@ def configure_wifi(ssid, password):
         _write_wpa_supplicant(networks)
 
         # wpa_supplicant control
+        try:
+            _ensure_wpa_running()
+        except Exception as e:
+            _dbg(f"Warnung: _ensure_wpa_running in configure_wifi: {type(e).__name__}: {e}")
         _reconfigure_wpa()
         # Try to actively select the desired network
         selected = _select_network(ssid)
@@ -470,15 +542,15 @@ def configure_wifi(ssid, password):
         _dbg("Stelle wpa_cli reconnect her …")
         _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconnect'])
 
-        # Poll for connection up to ~20s
-        _dbg("Starte Polling (max 20s) auf Ziel-SSID …")
-        for i in range(20):
+        # Poll for connection using configured cadence
+        _dbg(f"Starte Polling (max {_WIFI_POLL_TRIES * _WIFI_POLL_INTERVAL:.0f}s, Intervall={_WIFI_POLL_INTERVAL}s) auf Ziel-SSID …")
+        for i in range(_WIFI_POLL_TRIES):
             cur = current_ssid(force=True)
-            _dbg(f"Polling {i+1}/20: aktuelle SSID={cur} | Ziel={ssid} | Interpretation: {'OK' if cur == ssid else 'noch nicht verbunden'}")
+            _dbg(f"Polling {i+1}/{_WIFI_POLL_TRIES}: aktuelle SSID={cur} | Ziel={ssid} | Interpretation: {'OK' if cur == ssid else 'noch nicht verbunden'}")
             if cur == ssid:
                 _dbg("Ziel-SSID verbunden – Erfolg.")
                 return True
-            time.sleep(1)
+            time.sleep(_WIFI_POLL_INTERVAL)
         _dbg("Verbindungsaufbau innerhalb des Zeitfensters nicht erfolgt – Misserfolg.")
         return False
     except Exception as e:

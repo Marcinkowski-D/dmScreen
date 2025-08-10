@@ -7,9 +7,14 @@ import threading
 import concurrent.futures
 from datetime import datetime
 import hashlib
+from xmlrpc.client import DateTime
+
 import dotenv
 
 dotenv.load_dotenv()
+
+# Generate unique server instance ID based on current timestamp
+SERVER_INSTANCE_ID = hashlib.md5(str(time.time()).encode()).hexdigest()
 
 from flask import (
     Flask,
@@ -464,7 +469,7 @@ def get_current_state():
 
 @app.route('/api/updates', methods=['GET'])
 def check_updates():
-    global last_update_timestamp, admin_connected
+    global last_update_timestamp, admin_connected, SERVER_INSTANCE_ID
     # Determine network status first
     try:
         connected = check_wifi_connection()
@@ -487,6 +492,7 @@ def check_updates():
     admin_url = f"http://{ip_address}{port_part}/admin"
     return jsonify({
         'timestamp': last_update_timestamp,
+        'instance_id': SERVER_INSTANCE_ID,
         'admin_connected': admin_connected,
         'ip': admin_url,
         'wifi_connected': connected,

@@ -6,6 +6,8 @@ const ipOverlay = document.getElementById('ip-overlay');
 // Canvas context
 const displayCtx = displayCanvas.getContext('2d');
 
+let INSTANCE_ID = null;
+
 // Helper function to draw an image on canvas in "contain" mode (16:9 aspect ratio)
 function drawImageContain(ctx, img, canvasWidth, canvasHeight) {
     // Clear the canvas
@@ -103,6 +105,15 @@ async function fetchUpdates() {
     try {
         const response = await fetch('/api/updates');
         const data = await response.json();
+
+        if (INSTANCE_ID === ''){
+            INSTANCE_ID = data.instance_id;
+        }
+
+        if(INSTANCE_ID !== data.instance_id){
+            location.reload();
+        }
+
 
         // If there's a new update, fetch the current state
         if (data.timestamp > lastUpdateTimestamp) {
