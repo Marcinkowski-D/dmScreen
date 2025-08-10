@@ -1,54 +1,59 @@
 #!/bin/bash
 # forget-wifi.sh
-# Trennt das aktuelle WLAN und löscht die Zugangsdaten
-
-# --- Root prüfen ---
-if [ "$EUID" -ne 0 ]; then
-    echo "Bitte mit sudo ausführen."
-    exit 1
-fi
+# Trennt das aktuelle WLAN auf wlan0 und entfernt dessen network-Block aus wpa_supplicant.conf
+# eth0 bleibt unangetastet.
 
 WPA_FILE="/etc/wpa_supplicant/wpa_supplicant.conf"
+IFACE="wlan0"
 
-# --- Aktuelle SSID ermitteln ---
-SSID=$(iwgetid -r)
+log(){ echo -e "$@"; }
+need_root(){ [ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }; }
+have(){ command -v "$1" >/dev/null 2>&1; }
 
+need_root
+
+SSID=$(iwgetid "$IFACE" -r 2>/dev/null)
 if [ -z "$SSID" ]; then
-    echo "[!] Nicht mit einem WLAN verbunden."
-    exit 1
+  echo "[!] Nicht mit einem WLAN verbunden (wlan0)."
+  exit 1
 fi
 
-echo "[*] Trenne von WLAN: $SSID"
+echo "[*] Trenne WLAN \"$SSID\" und entferne Zugangsdaten aus ${WPA_FILE}"
 
-# --- WLAN trennen ---
-wpa_cli -i wlan0 disconnect >/dev/null 2>&1
+# Trennen (nur wlan0)
+if have wpa_cli; then wpa_cli -i "$IFACE" disconnect >/dev/null 2>&1 || true; fi
+ip addr flush dev "$IFACE" || true
 
-# --- Zugangsdaten entfernen ---
-if grep -q "ssid=\"$SSID\"" "$WPA_FILE"; then
-    echo "[*] Entferne $SSID aus $WPA_FILE..."
-    # Backup erstellen
-    cp "$WPA_FILE" "${WPA_FILE}.bak.$(date +%s)"
-    # Mit awk den entsprechenden network-Block löschen
-    awk -v ssid="$SSID" '
-    BEGIN {in_block=0}
-    {
-        if ($0 ~ "network=") {
-            in_block=0
-        }
+# Backup und Block entfernen
+[ -f "$WPA_FILE" ] || { echo "[!] ${WPA_FILE} nicht gefunden."; exit 1; }
+cp "$WPA_FILE" "${WPA_FILE}.bak.$(date +%s)"
+
+awk -v ssid="$SSID" '
+BEGIN{inblk=0}
+{
+  if($0 ~ /^network=\{/){inblk=1; buf=$0 ORS; next}
+  if(inblk){
+    buf=buf $0 ORS
+    if($0 ~ /^\}/){
+      if(buf ~ "ssid=\""ssid"\""){next} # Block verwerfen
+      else{printf "%s", buf}
+      inblk=0; buf=""
     }
-    {
-        if ($0 ~ "ssid=\""ssid"\"") {
-            in_block=1
-        }
-        if (!in_block) {
-            print $0
-        }
-    }' "$WPA_FILE" > "${WPA_FILE}.tmp" && mv "${WPA_FILE}.tmp" "$WPA_FILE"
-else
-    echo "[!] SSID $SSID nicht in $WPA_FILE gefunden."
-fi
+    next
+  }
+  print
+}' "$WPA_FILE" > "${WPA_FILE}.tmp" && mv "${WPA_FILE}.tmp" "$WPA_FILE"
 
-# --- WLAN-Dienst neu starten ---
-systemctl restart dhcpcd
+# Neu laden
+systemctl start wpa_supplicant >/dev/null 2>&1 || systemctl start "wpa_supplicant@$IFACE" >/dev/null 2>&1 || true
+if have wpa_cli; then wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true; fi
 
-echo "[+] WLAN $SSID wurde getrennt und entfernt."
+# DHCP für wlan0 freigeben (ohne eth0 zu berühren)
+have dhcpcd && dhcpcd -x "$IFACE" >/dev/null 2>&1 || true
+
+WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
+ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
+
+echo "[+] WLAN \"$SSID\" getrennt und vergessen."
+[ -n "$WLAN_IP" ] && echo "    WLAN-IP: ${WLAN_IP}" || echo "    WLAN-IP: -"
+[ -n "$ETH_IP" ] && echo "    LAN-IP:  ${ETH_IP}"
