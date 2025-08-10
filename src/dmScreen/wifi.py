@@ -45,7 +45,7 @@ _WIFI_POLL_INTERVAL = float(os.getenv('DM_WIFI_POLL_INTERVAL', '5'))  # seconds
 _WIFI_POLL_TRIES = int(os.getenv('DM_WIFI_POLL_TRIES', '10'))
 
 # Control whether we temporarily pause AP to perform scans (helps when interface is busy)
-_WIFI_SCAN_PAUSE_AP = not (os.getenv('DM_WIFI_SCAN_PAUSE_AP', '1').lower() in ('0', 'false', 'no', 'off', ''))
+_WIFI_SCAN_PAUSE_AP = not (os.getenv('DM_WIFI_SCAN_PAUSE_AP', '0').lower() in ('0', 'false', 'no', 'off', ''))
 
 # -----------------------------
 # Helpers for known networks

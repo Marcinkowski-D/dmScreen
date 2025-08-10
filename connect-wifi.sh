@@ -43,9 +43,18 @@ wpa_cli -i wlan0 reconfigure 2>/dev/null || systemctl restart dhcpcd
 
 # --- Verbindung prüfen ---
 sleep 5
-IP=$(hostname -I | awk '{print $1}')
-if [ -n "$IP" ]; then
-    echo "[+] Erfolgreich verbunden. IP-Adresse: $IP"
+WLAN_IP=$(ip -4 addr show wlan0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+ETH_IP=$(ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+
+if [ -n "$WLAN_IP" ]; then
+    echo "[+] Erfolgreich mit $SSID verbunden."
+    echo "    WLAN-IP: $WLAN_IP"
+    if [ -n "$ETH_IP" ]; then
+        echo "    LAN-IP:  $ETH_IP"
+    fi
 else
-    echo "[!] Keine IP erhalten. Bitte WLAN-Daten prüfen."
+    echo "[!] Keine WLAN-IP erhalten. Bitte WLAN-Daten prüfen."
+    if [ -n "$ETH_IP" ]; then
+        echo "    LAN-IP:  $ETH_IP (über Kabel verbunden)"
+    fi
 fi
