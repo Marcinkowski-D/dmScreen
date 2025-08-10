@@ -32,6 +32,14 @@ def _dbg(msg: str):
         except Exception:
             pass
 
+# Cache for throttling system checks
+_WIFI_CACHE_TTL = float(os.getenv('DM_WIFI_CACHE_TTL', '5'))  # seconds
+_wifi_cache_lock = Lock()
+_cached_ssid = None
+_cached_ssid_ts = 0.0
+_cached_adhoc = None  # bool or None
+_cached_adhoc_ts = 0.0
+
 # -----------------------------
 # Helpers for known networks
 # -----------------------------
@@ -132,29 +140,49 @@ def check_wifi_connection():
         return False
 
 
-def current_ssid():
-    """Return current connected SSID if available, else None (Raspberry Pi/Debian via iwgetid)."""
+def current_ssid(force: bool = False):
+    """Return current connected SSID if available, else None (Raspberry Pi/Debian via iwgetid).
+    Uses 5s cache by default; set force=True to bypass cache.
+    """
+    now = time.time()
+    with _wifi_cache_lock:
+        if not force and (now - _cached_ssid_ts) < _WIFI_CACHE_TTL:
+            _dbg(f"Aktuelle SSID (Cache-Hit, Alter={int(now - _cached_ssid_ts)}s): {_cached_ssid}")
+            return _cached_ssid
     _dbg("Ermittle aktuelle SSID via iwgetid -r …")
     res = _run_cmd(['iwgetid', '-r'])
+    ssid = None
     if res.returncode == 0:
         s = (res.stdout or '').strip()
         if s:
             _dbg(f"Aktuelle SSID erkannt: '{s}' (Interpretation: verbunden)")
-            return s
-        _dbg("iwgetid lieferte leeren String (Interpretation: nicht verbunden)")
+            ssid = s
+        else:
+            _dbg("iwgetid lieferte leeren String (Interpretation: nicht verbunden)")
     else:
         _dbg(f"iwgetid fehlgeschlagen rc={res.returncode} (Interpretation: Werkzeug nicht verfügbar oder kein Link)")
-    return None
+    with _wifi_cache_lock:
+        globals()['_cached_ssid'] = ssid
+        globals()['_cached_ssid_ts'] = now
+    return ssid
 
 
-def check_adhoc_network():
-    """Check if adhoc network (hostapd) is active"""
+def check_adhoc_network(force: bool = False):
+    """Check if adhoc network (hostapd) is active. Uses 5s cache unless force=True."""
     try:
+        now = time.time()
+        with _wifi_cache_lock:
+            if not force and (now - _cached_adhoc_ts) < _WIFI_CACHE_TTL:
+                _dbg(f"AP-Status (Cache-Hit, Alter={int(now - _cached_adhoc_ts)}s): {_cached_adhoc}")
+                return bool(_cached_adhoc)
         _dbg("Prüfe Ad-hoc (AP) Status: systemctl is-active hostapd …")
         result = _run_cmd(['systemctl', 'is-active', 'hostapd'])
         status = (result.stdout or '').strip()
         active = status == 'active'
         _dbg(f"hostapd Status: '{status}' (Interpretation: {'aktiv' if active else 'inaktiv'})")
+        with _wifi_cache_lock:
+            globals()['_cached_adhoc'] = active
+            globals()['_cached_adhoc_ts'] = now
         return active
     except Exception as e:
         _dbg(f"Fehler beim Prüfen von hostapd: {type(e).__name__}: {e}")
@@ -230,7 +258,7 @@ def create_adhoc_network():
         # Wait briefly and verify
         _dbg("Warte 2s und prüfe dann den AP-Status …")
         time.sleep(2)
-        is_active = check_adhoc_network()
+        is_active = check_adhoc_network(force=True)
         _dbg(f"Ad-hoc-Netzwerk Status: {'aktiv' if is_active else 'inaktiv'}")
         return is_active
     except Exception as e:
@@ -413,8 +441,9 @@ def connect_best_known_network():
         _reconfigure_wpa()
         _dbg("Warte 8s auf Verbindungsaufbau …")
         time.sleep(8)
-        connected = check_wifi_connection()
-        _dbg(f"Ergebnis Verbindungsversuch: {'verbunden' if connected else 'nicht verbunden'} | SSID={current_ssid()}")
+        cur_ssid = current_ssid(force=True)
+        connected = cur_ssid is not None
+        _dbg(f"Ergebnis Verbindungsversuch: {'verbunden' if connected else 'nicht verbunden'} | SSID={cur_ssid}")
         return connected
     except Exception as e:
         _dbg(f"connect_best_known_network Fehler: {type(e).__name__}: {e}")
@@ -444,7 +473,7 @@ def configure_wifi(ssid, password):
         # Poll for connection up to ~20s
         _dbg("Starte Polling (max 20s) auf Ziel-SSID …")
         for i in range(20):
-            cur = current_ssid()
+            cur = current_ssid(force=True)
             _dbg(f"Polling {i+1}/20: aktuelle SSID={cur} | Ziel={ssid} | Interpretation: {'OK' if cur == ssid else 'noch nicht verbunden'}")
             if cur == ssid:
                 _dbg("Ziel-SSID verbunden – Erfolg.")
@@ -462,7 +491,7 @@ def disconnect_and_forget_current():
     Returns (success, ssid)."""
     try:
         _dbg("Starte Disconnect und Vergessen des aktuellen WLANs …")
-        ssid = current_ssid()
+        ssid = current_ssid(force=True)
         _dbg(f"Aktueller Zustand vor Disconnect: SSID={ssid}")
         # Proactively remove the network from OS runtime configs so it won't reconnect
         if ssid:
