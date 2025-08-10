@@ -106,11 +106,11 @@ async function fetchUpdates() {
         const response = await fetch('/api/updates');
         const data = await response.json();
 
-        if (INSTANCE_ID === ''){
+        if (!INSTANCE_ID) {
+            // initialize instance id on first response
             INSTANCE_ID = data.instance_id;
-        }
-
-        if(INSTANCE_ID !== data.instance_id){
+        } else if (INSTANCE_ID !== data.instance_id) {
+            // server restarted -> reload view to reinitialize state
             location.reload();
         }
 

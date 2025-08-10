@@ -1183,10 +1183,10 @@ wifiForm.addEventListener('submit', async (e) => {
         const data = await response.json();
 
         if (data.success) {
-            showAlert('WiFi configured successfully');
+            showAlert(data.message || "Connected. The new IP address is shown on the device's screen. You can close this tab.");
             setTimeout(checkWifiStatus, 5000); // Check status after 5 seconds
         } else {
-            showAlert(`Failed to configure WiFi: ${data.message}`);
+            showAlert(data.message ? `Failed to configure WiFi: ${data.message}` : 'Failed to configure WiFi');
         }
 
     } catch (error) {
@@ -1208,7 +1208,6 @@ async function checkWifiStatus() {
             wifiStatus.innerHTML = `<span class="disconnected">Not connected to WiFi</span>`;
             if (wifiForm) wifiForm.style.display = 'block';
             if (wifiDisconnectBtn) wifiDisconnectBtn.style.display = 'none';
-            if (typeof scanWifiNetworks === 'function') scanWifiNetworks();
         }
 
     } catch (error) {
@@ -2233,40 +2232,7 @@ async function saveCropSettings() {
     }
 }
 
-// WiFi scan and datalist population
-async function scanWifiNetworks() {
-    try {
-        if (!wifiSSIDList) return;
-        const res = await fetch('/api/wifi/scan');
-        if (!res.ok) throw new Error('Scan failed');
-        const data = await res.json();
-        // Clear existing options
-        while (wifiSSIDList.firstChild) {
-            wifiSSIDList.removeChild(wifiSSIDList.firstChild);
-        }
-        if (Array.isArray(data.ssids)) {
-            const frag = document.createDocumentFragment();
-            data.ssids.forEach(ssid => {
-                if (!ssid) return;
-                const opt = document.createElement('option');
-                opt.value = ssid;
-                frag.appendChild(opt);
-            });
-            wifiSSIDList.appendChild(frag);
-        }
-    } catch (err) {
-        console.error('Error scanning WiFi networks:', err);
-    }
-}
-
 document.addEventListener('DOMContentLoaded', () => {
-    if (typeof scanWifiNetworks === 'function') {
-        // Perform initial scan on load
-        scanWifiNetworks();
-    }
-    if (wifiScanBtn) {
-        wifiScanBtn.addEventListener('click', scanWifiNetworks);
-    }
     if (wifiDisconnectBtn) {
         wifiDisconnectBtn.addEventListener('click', async () => {
             try {
@@ -2281,7 +2247,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await resp.json();
                 if (resp.ok && data.success) {
                     const ssidText = data.ssid ? ` from: ${data.ssid}` : '';
-                    showAlert(`Disconnected${ssidText}.`);
+                    showAlert(data.message || `Disconnected${ssidText}.`);
                     setTimeout(checkWifiStatus, 2000);
                 } else {
                     showAlert('Failed to disconnect WiFi');

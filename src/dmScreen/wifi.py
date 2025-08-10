@@ -706,7 +706,10 @@ def register_wifi_routes(app, on_change=None):
         _dbg(f"API /api/wifi/configure Ergebnis: success={success}")
         return jsonify({
             'success': success,
-            'message': 'WiFi configured successfully' if success else 'Failed to configure WiFi'
+            'message': (
+                "Connected. The new IP address is shown on the device's screen. You can close this tab."
+                if success else 'Failed to configure WiFi'
+            )
         })
 
     @app.route('/api/wifi/known', methods=['GET'])
@@ -760,16 +763,6 @@ def register_wifi_routes(app, on_change=None):
                 pass
         return jsonify({'removed': removed})
 
-    @app.route('/api/wifi/scan', methods=['GET'])
-    def api_scan():
-        _dbg("API GET /api/wifi/scan …")
-        try:
-            ssids = sorted(list(_scan_visible_ssids()))
-            _dbg(f"API /api/wifi/scan -> {len(ssids)} SSIDs: {ssids}")
-            return jsonify({'ssids': ssids})
-        except Exception as e:
-            _dbg(f"API /api/wifi/scan Fehler: {type(e).__name__}: {e}")
-            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/wifi/disconnect', methods=['POST'])
     def api_disconnect():
@@ -781,7 +774,11 @@ def register_wifi_routes(app, on_change=None):
                 on_change()
             except Exception:
                 pass
-        return jsonify({'success': success, 'ssid': ssid})
+        msg = (
+            'Wifi disconnected, use AP "dmscreen" (password "dmscreen") and navigate to 192.168.4.1 to continue. You can close this tab.'
+            if success else 'Failed to disconnect WiFi'
+        )
+        return jsonify({'success': success, 'ssid': ssid, 'message': msg})
 
     return {
         'get_wifi_status': get_wifi_status,
@@ -789,7 +786,6 @@ def register_wifi_routes(app, on_change=None):
         'list_known': api_list_known,
         'add_known': api_add_known,
         'remove_known': api_remove_known,
-        'scan': api_scan,
         'disconnect': api_disconnect,
     }
 

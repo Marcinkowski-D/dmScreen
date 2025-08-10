@@ -968,7 +968,10 @@ def main():
         
         return jsonify({
             'success': success,
-            'message': 'WiFi configured successfully' if success else 'Failed to configure WiFi'
+            'message': (
+                "Connected. The new IP address is shown on the device's screen. You can close this tab."
+                if success else 'Failed to configure WiFi'
+            )
         })
 
     print('looking if linux')
