@@ -79,20 +79,21 @@ def _run_cmd(args, check=False):
 # WiFi-related functions
 
 def check_wifi_connection():
-    """Check if WiFi is connected (Raspberry Pi: iwgetid -r)"""
+    """Check if WiFi is connected"""
     try:
-        result = _run_cmd(['iwgetid', '-r'])
-        return result.stdout.strip() != ''
+        return current_ssid() is not None
     except Exception:
         return False
 
 
 def current_ssid():
-    try:
-        result = _run_cmd(['iwgetid', '-r'])
-        return result.stdout.strip() or None
-    except Exception:
-        return None
+    """Return current connected SSID if available, else None (Raspberry Pi/Debian via iwgetid)."""
+    res = _run_cmd(['iwgetid', '-r'])
+    if res.returncode == 0:
+        s = (res.stdout or '').strip()
+        if s:
+            return s
+    return None
 
 
 def check_adhoc_network():
@@ -179,7 +180,8 @@ country=DE
 
 """
     blocks = []
-    for prio, net in enumerate(networks[::-1], start=1):
+    # Assign higher priority to later entries so the most recently added network wins
+    for prio, net in enumerate(networks, start=1):
         ssid = net.get('ssid', '')
         psk = net.get('password', '')
         blocks.append(
@@ -193,6 +195,33 @@ country=DE
 
 def _reconfigure_wpa():
     _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+
+
+
+
+def _select_network(ssid: str) -> bool:
+    """Select a network by SSID via wpa_cli if present in runtime config."""
+    try:
+        res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
+        if res.returncode != 0 or not res.stdout:
+            return False
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if not line or line.lower().startswith('network id'):
+                continue
+            parts = [p for p in line.split('\t') if p != '']
+            if len(parts) < 2:
+                parts = [p for p in line.split() if p != '']
+            if len(parts) >= 2:
+                nid = parts[0].strip()
+                s = parts[1].strip()
+                if s == ssid:
+                    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'select_network', nid])
+                    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reassociate'])
+                    return True
+        return False
+    except Exception:
+        return False
 
 
 def _os_forget_network_wpa(ssid: str):
@@ -225,28 +254,6 @@ def _os_forget_network_wpa(ssid: str):
         return False
 
 
-def _os_forget_network_nmcli(ssid: str):
-    """If NetworkManager is present, delete connection with this SSID name."""
-    try:
-        res = _run_cmd(['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'])
-        if res.returncode != 0 or not res.stdout:
-            return False
-        deleted = False
-        for line in res.stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(':')
-            if len(parts) >= 2:
-                name, ctype = parts[0], parts[1]
-                # typical types: wifi or 802-11-wireless
-                if name == ssid and ('wifi' in ctype or '802-11-wireless' in ctype):
-                    _run_cmd(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid])
-                    deleted = True
-        return deleted
-    except Exception as e:
-        # nmcli may not exist; ignore
-        return False
 
 
 def _forget_network_everywhere(ssid: str):
@@ -256,16 +263,11 @@ def _forget_network_everywhere(ssid: str):
             removed = _os_forget_network_wpa(ssid) or removed
     except Exception:
         pass
-    try:
-        if ssid:
-            removed = _os_forget_network_nmcli(ssid) or removed
-    except Exception:
-        pass
     return removed
 
 
 def _scan_visible_ssids():
-    """Return a set of visible SSIDs using iw or nmcli"""
+    """Return a set of visible SSIDs using iw or iwlist (Debian/Raspberry Pi)."""
     ssids = set()
     # Try iw dev wlan0 scan
     res = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
@@ -282,14 +284,6 @@ def _scan_visible_ssids():
                 line = line.strip()
                 if line.startswith('ESSID:'):
                     name = line.split('ESSID:', 1)[1].strip().strip('"')
-                    if name:
-                        ssids.add(name)
-        else:
-            # Fallback to nmcli
-            res3 = _run_cmd(['nmcli', '-t', '-f', 'SSID', 'dev', 'wifi'])
-            if res3.returncode == 0 and res3.stdout:
-                for line in res3.stdout.splitlines():
-                    name = line.strip()
                     if name:
                         ssids.add(name)
     return ssids
@@ -327,9 +321,21 @@ def configure_wifi(ssid, password):
         networks = _load_known_networks()
         _stop_ap_services()
         _write_wpa_supplicant(networks)
+
+
+        # Fallback to wpa_supplicant control
         _reconfigure_wpa()
-        time.sleep(8)
-        return check_wifi_connection()
+        # Try to actively select the desired network
+        _select_network(ssid)
+        # Ensure reassociation in case driver is idle
+        _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconnect'])
+
+        # Poll for connection up to ~20s
+        for _ in range(20):
+            if current_ssid() == ssid:
+                return True
+            time.sleep(1)
+        return False
     except Exception as e:
         print(f"Error configuring WiFi: {e}")
         return False
