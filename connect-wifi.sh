@@ -19,13 +19,19 @@ fi
 
 echo "[*] Verbinde mit SSID: $SSID"
 
+# --- Sicherstellen, dass wlan0 nicht mehr im AP-Modus hängt ---
+if [ -f "/etc/network/interfaces.d/wlan0" ]; then
+    rm -f /etc/network/interfaces.d/wlan0
+fi
+ip addr flush dev wlan0
+
 # --- Backup bestehender Konfiguration ---
 WPA_FILE="/etc/wpa_supplicant/wpa_supplicant.conf"
 if [ -f "$WPA_FILE" ]; then
     cp "$WPA_FILE" "${WPA_FILE}.bak.$(date +%s)"
 fi
 
-# --- Netzwerkblock erstellen ---
+# --- Neue WLAN-Konfig schreiben ---
 cat <<EOF > "$WPA_FILE"
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
@@ -37,9 +43,10 @@ network={
 }
 EOF
 
-# --- Dienst neu starten ---
+# --- WLAN-Dienste neu starten ---
 echo "[*] WLAN-Dienst wird neu gestartet..."
-wpa_cli -i wlan0 reconfigure 2>/dev/null || systemctl restart dhcpcd
+systemctl restart wpa_supplicant
+systemctl restart dhcpcd
 
 # --- Verbindung prüfen ---
 sleep 5
