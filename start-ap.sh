@@ -13,6 +13,8 @@ DEFAULT_HOSTAPD="/etc/default/hostapd"
 command -v hostapd >/dev/null 2>&1 || { echo "[!] hostapd fehlt: sudo apt-get install -y hostapd"; exit 1; }
 command -v dnsmasq >/dev/null 2>&1 || { echo "[!] dnsmasq fehlt: sudo apt-get install -y dnsmasq"; exit 1; }
 
+set -o pipefail
+
 echo "[*] Starte AP \"$SSID\"..."
 
 # Client-Dienste auf wlan0 stoppen
@@ -23,6 +25,7 @@ pkill -f "dhclient.*$IFACE" >/dev/null 2>&1 || true
 
 # WLAN hoch + statische AP-IP
 rfkill unblock wifi 2>/dev/null || true
+iw reg set DE 2>/dev/null || true
 ip link set "$IFACE" up 2>/dev/null || true
 ip addr flush dev "$IFACE" 2>/dev/null || true
 ip addr add "$AP_IP_CIDR" dev "$IFACE"
@@ -67,16 +70,58 @@ systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null
 
 # hostapd starten
 systemctl unmask hostapd >/dev/null 2>&1 || true
+systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl start hostapd
 
-sleep 1
-if systemctl is-active --quiet hostapd; then
+# Funktion zur echten AP-Statusprüfung
+is_ap_active() {
+  # Prüfe, ob Interface im AP-Mode ist oder zumindest die AP-IP trägt
+  if iw dev "$IFACE" info 2>/dev/null | grep -qE '\btype (AP|__ap)\b'; then
+    return 0
+  fi
+  if iwconfig "$IFACE" 2>/dev/null | grep -qE 'Mode:(Master|AP)'; then
+    return 0
+  fi
+  if ip -4 addr show "$IFACE" 2>/dev/null | awk '/inet /{print $2}' | grep -q '^192\.168\.4\.'; then
+    # IP vorhanden ist noch kein Beweis, aber hilfreich als Signal – zählt hier als Teilbedingung
+    return 1
+  fi
+  return 1
+}
+
+# Warte auf echten AP-Mode (bis 10s)
+tries=0
+ok=0
+while [ $tries -lt 10 ]; do
+  if systemctl is-active --quiet hostapd && is_ap_active; then
+    ok=1; break
+  fi
+  sleep 1
+  tries=$((tries+1))
+done
+
+if [ "$ok" -ne 1 ]; then
+  echo "[!] AP scheint nicht aktiv zu sein – versuche Neustart von hostapd …"
+  systemctl restart hostapd
+  tries=0
+  while [ $tries -lt 10 ]; do
+    if systemctl is-active --quiet hostapd && is_ap_active; then
+      ok=1; break
+    fi
+    sleep 1
+    tries=$((tries+1))
+  done
+fi
+
+if [ "$ok" -eq 1 ]; then
   WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
   ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
   echo "[+] AP aktiv. SSID: \"$SSID\"  Passwort: \"$PASS\""
   echo "    AP-IP (wlan0): ${WLAN_IP:-192.168.4.1}"
   [ -n "$ETH_IP" ] && echo "    LAN-IP (eth0): $ETH_IP"
+  exit 0
 else
-  echo "[!] hostapd konnte nicht gestartet werden. Logs: journalctl -u hostapd -b"
+  echo "[!] hostapd konnte nicht korrekt aktiviert werden. Prüfe Logs: journalctl -u hostapd -b"
+  echo "    Tipp: Stelle sicher, dass kein wpa_supplicant und keine NetworkManager-Instanz wlan0 belegt."
   exit 2
 fi
