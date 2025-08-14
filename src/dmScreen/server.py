@@ -39,8 +39,8 @@ from dmScreen.cache_worker import (
 def get_lan_ip():
     try:
         p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*' | head -n 1")
-        print(p)
-        return '127.0.0.1' ## debug
+        print(p.stdout)
+        return p.stdout.decode('utf-8').strip()
     except:
         return "127.0.0.1"
 
@@ -81,7 +81,7 @@ def recompute_network_status():
         except Exception:
             adhoc_active = False
     # Choose IP depending on mode
-    ip_address = '192.168.4.1' if adhoc_active else get_lan_ip()
+    ip_address = get_lan_ip()
     port = int(os.getenv('PORT', '80'))
     port_part = '' if port == 80 else f':{port}'
     admin_url = f"http://{ip_address}{port_part}/admin"
