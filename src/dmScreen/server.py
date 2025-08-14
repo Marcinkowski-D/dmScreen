@@ -53,7 +53,7 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network, current_ssid, stop_adhoc_network
+from dmScreen.wifi import start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network, current_ssid, stop_adhoc_network
 
 # Global variables
 admin_connected = False  # Track if admin has connected
