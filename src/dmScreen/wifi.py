@@ -145,7 +145,7 @@ def _run_cmd(args, check=False):
 def _run_script(script_name: str, *script_args):
     """Helper to run one of the provided WiFi/AP scripts located at project root with sudo."""
     script_path = os.path.join(_PROJECT_ROOT, script_name)
-    cmd = ['sudo', script_path, *[str(a) for a in script_args]]
+    cmd = ['sudo', '/bin/bash', script_path, *[str(a) for a in script_args]]
     return _run_cmd(cmd)
 
 
