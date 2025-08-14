@@ -19,6 +19,8 @@ os.makedirs(_DATA_DIR, exist_ok=True)
 _DM_WIFI_DEBUG_ENV = os.getenv('DM_WIFI_DEBUG', '1')
 _DEBUG_WIFI = not (_DM_WIFI_DEBUG_ENV.lower() in ('0', 'false', 'no', 'off', ''))
 
+config_lock = Lock()
+
 def _ts():
     try:
         return time.strftime('%Y-%m-%d %H:%M:%S')
@@ -411,34 +413,35 @@ def configure_wifi(ssid, password):
         return False
 
 def connect_network():
-    global target_wifi
-    known_ssids = _load_known_networks()
-    conf = next((s for s in known_ssids if s['ssid'] == target_wifi), None)
-    _run_script('stop-ap.sh')
-    _run_script('connect-wifi.sh', conf['ssid'], conf['password'])
-    current_wifi = target_wifi
+    global target_wifi, config_lock
+    with config_lock:
+        current_wifi = target_wifi
+        known_ssids = _load_known_networks()
+        conf = next((s for s in known_ssids if s['ssid'] == target_wifi), None)
+        _run_script('stop-ap.sh')
+        _run_script('connect-wifi.sh', conf['ssid'], conf['password'])
 
 
 
 def disconnect_and_forget_current():
 
-    global target_wifi, current_wifi
+    global target_wifi, current_wifi, config_lock
     """Disconnect from the currently connected WiFi using forget-wifi.sh, update known list, and start AP. Returns (success, ssid)."""
     try:
-
-        _run_script('forget-wifi.sh')
-        current_wifi = None
-        # Remove from known networks if present
-        if ssid:
-            try:
-                removed_known = remove_known_network(current_wifi)
-                _dbg(f"Entferne aus Known-Liste: ssid='{ssid}' -> removed={removed_known}")
-            except Exception as e:
-                _dbg(f"Fehler beim Entfernen aus Known-Liste: {type(e).__name__}: {e}")
-        # Start AP so user can reconnect/configure
-        _start_ap_services()
-        time.sleep(2)
-        _dbg("Disconnect abgeschlossen.")
+        with config_lock:
+            _run_script('forget-wifi.sh')
+            current_wifi = None
+            # Remove from known networks if present
+            if ssid:
+                try:
+                    removed_known = remove_known_network(current_wifi)
+                    _dbg(f"Entferne aus Known-Liste: ssid='{ssid}' -> removed={removed_known}")
+                except Exception as e:
+                    _dbg(f"Fehler beim Entfernen aus Known-Liste: {type(e).__name__}: {e}")
+            # Start AP so user can reconnect/configure
+            _start_ap_services()
+            time.sleep(2)
+            _dbg("Disconnect abgeschlossen.")
         return True, ssid
     except Exception as e:
         _dbg(f"disconnect_and_forget_current error: {type(e).__name__}: {e}")
@@ -478,7 +481,6 @@ def wifi_monitor():
                     change_callback()
                 except Exception:
                     pass
-
         time.sleep(1)
 
 
