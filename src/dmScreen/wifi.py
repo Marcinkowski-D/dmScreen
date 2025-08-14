@@ -412,8 +412,9 @@ def wifi_monitor():
     scanned_ssids = _scan_visible_ssids()
     print('scanned_ssids', scanned_ssids)
     while scanned_ssids is None or len(scanned_ssids) == 0:
-        print('scanned_ssids', scanned_ssids)
+        time.sleep(1)
         scanned_ssids = _scan_visible_ssids()
+        print('scanned_ssids', scanned_ssids)
     print('loading new networks')
     known_ssids = _load_known_networks()
     print(f'known_ssids: {known_ssids}')
