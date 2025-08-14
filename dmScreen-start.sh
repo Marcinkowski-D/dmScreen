@@ -2,6 +2,7 @@
 
 dhclient eth0
 # Install the package from Git repository
+git checkout .
 git pull
 chmod +x connect-wifi.sh
 chmod +x forget-wifi.sh
