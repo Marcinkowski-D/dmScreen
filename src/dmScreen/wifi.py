@@ -120,7 +120,7 @@ def remove_known_network(ssid):
 # WiFi/OS utilities
 # -----------------------------
 
-def run_cmd(args, check=False):
+def run_cmd(args, check=False, shell=False):
     """Run a system command and return CompletedProcess. Adds detailed debug logging.
     - Redacts secrets from args (password/psk/passphrase)
     - Logs duration, rc, and trimmed outputs.
@@ -138,7 +138,7 @@ def run_cmd(args, check=False):
         cmd_str = str(args)
     _dbg(f"CMD ausführen: {cmd_str}")
     try:
-        res = subprocess.run(args, capture_output=True, text=True, check=check, shell=True)
+        res = subprocess.run(args, capture_output=True, text=True, check=check, shell=shell)
         duration = int((time.time() - start) * 1000)
         out = (res.stdout or '').strip()
         err = (res.stderr or '').strip()

@@ -38,7 +38,7 @@ from dmScreen.cache_worker import (
 
 def get_lan_ip():
     try:
-        p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*' | head -n 1".split(' '))
+        p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*' | head -n 1", shell=True)
         print(p.stdout)
         return p.stdout.strip()
     except Exception as e:
