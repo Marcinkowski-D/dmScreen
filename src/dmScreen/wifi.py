@@ -355,7 +355,7 @@ def configure_wifi(ssid, password):
         return False
 
 def connect_network():
-    global target_wifi, config_lock
+    global target_wifi, current_wifi, config_lock
     with config_lock:
         current_wifi = target_wifi
         known_ssids = _load_known_networks()
