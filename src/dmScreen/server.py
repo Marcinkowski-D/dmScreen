@@ -1049,14 +1049,6 @@ def register_wifi_routes(app, on_change=None):
         )
         return jsonify({'success': success, 'ssid': ssid, 'message': msg})
 
-    return {
-        'get_wifi_status': get_wifi_status,
-        'set_wifi_config': set_wifi_config,
-        'list_known': api_list_known,
-        'add_known': api_add_known,
-        'remove_known': api_remove_known,
-        'disconnect': api_disconnect,
-    }
 
 
 def main():
