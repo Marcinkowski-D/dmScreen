@@ -966,6 +966,8 @@ def get_image_url(image_id):
 # Flask route handlers for WiFi functionality
 def register_wifi_routes(app, on_change=None):
 
+    set_change_callback(on_change)
+
     # Debug logging for WiFi
     _DM_WIFI_DEBUG_ENV = os.getenv('DM_WIFI_DEBUG', '1')
     _DEBUG_WIFI = not (_DM_WIFI_DEBUG_ENV.lower() in ('0', 'false', 'no', 'off', ''))
@@ -1012,11 +1014,6 @@ def register_wifi_routes(app, on_change=None):
             _dbg("API /api/wifi/configure: fehlende Felder -> 400")
             return jsonify({'error': 'SSID and password are required'}), 400
         success = configure_wifi(ssid, password)
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
         _dbg(f"API /api/wifi/configure Ergebnis: success={success}")
         return jsonify({
             'success': success,
@@ -1036,13 +1033,8 @@ def register_wifi_routes(app, on_change=None):
     @app.route('/api/wifi/disconnect', methods=['POST'])
     def api_disconnect():
         _dbg("API POST /api/wifi/disconnect ...")
-        success, ssid = disconnect_and_forget_current()
+        set_target_wifi(None)
         _dbg(f"API /api/wifi/disconnect Ergebnis: success={success} | entfernte SSID={ssid}")
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
         msg = (
             'Wifi disconnected, use AP "dmscreen" (password "dmscreen") and navigate to 192.168.4.1 to continue. You can close this tab.'
             if success else 'Failed to disconnect WiFi'

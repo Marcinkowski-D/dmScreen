@@ -32,6 +32,8 @@ def _dbg(msg: str):
         except Exception:
             pass
 
+change_callback = None
+
 # Cache for throttling system checks
 _WIFI_CACHE_TTL = float(os.getenv('DM_WIFI_CACHE_TTL', '5'))  # seconds
 _wifi_cache_lock = Lock()
@@ -53,6 +55,10 @@ current_wifi = None
 # -----------------------------
 # Helpers for known networks
 # -----------------------------
+
+def set_change_callback(cb):
+    global change_callback
+    change_callback = cb
 
 def _load_known_networks():
     try:
@@ -410,14 +416,18 @@ def connect_network():
     conf = next((s for s in known_ssids if s['ssid'] == target_wifi), None)
     _run_script('stop-ap.sh')
     _run_script('connect-wifi.sh', conf['ssid'], conf['password'])
+    current_wifi = target_wifi
 
 
 
 def disconnect_and_forget_current():
+
+    global target_wifi, current_wifi
     """Disconnect from the currently connected WiFi using forget-wifi.sh, update known list, and start AP. Returns (success, ssid)."""
     try:
 
         _run_script('forget-wifi.sh')
+        current_wifi = None
         # Remove from known networks if present
         if ssid:
             try:
@@ -436,7 +446,7 @@ def disconnect_and_forget_current():
 
 
 def wifi_monitor():
-    global target_wifi, current_wifi
+    global target_wifi, current_wifi, change_callback
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
 
@@ -455,9 +465,19 @@ def wifi_monitor():
     while True:
         if target_wifi is None and current_wifi is not None:
             disconnect_and_forget_current()
+            if change_callback:
+                try:
+                    change_callback()
+                except Exception:
+                    pass
 
         if target_wifi is not None and current_wifi != target_wifi:
             connect_network()
+            if change_callback:
+                try:
+                    change_callback()
+                except Exception:
+                    pass
 
         time.sleep(1)
 
