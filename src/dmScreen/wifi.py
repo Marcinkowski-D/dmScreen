@@ -411,7 +411,7 @@ def wifi_monitor():
     time.sleep(1)
 
     for k_ssid in known_ssids:
-        if k_ssid['ssid'] in ssids:
+        if k_ssid['ssid'] in scanned_ssids:
             target_wifi = k_ssid['ssid']
             break
 
