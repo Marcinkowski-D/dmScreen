@@ -94,7 +94,7 @@ def cache_worker(cache_folder: str, upload_folder: str):
                 
                 # Skip if already cached
                 if os.path.exists(cache_path) or job.cache_key in cached_images:
-                    print(f"Skipping already cached image: {job.image_path}")
+                    # print(f"Skipping already cached image: {job.image_path}")
                     continue
                 
                 # Add to cached_images set to prevent duplicate processing
