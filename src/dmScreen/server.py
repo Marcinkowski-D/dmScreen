@@ -50,8 +50,19 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import start_wifi_monitor, configure_wifi, add_known_network, current_ssid, disconnect_and_forget_current, set_target_wifi, set_change_callback, check_adhoc_network, check_wifi_connection, \
-    run_cmd
+from dmScreen.wifi import (
+    start_wifi_monitor,
+    configure_wifi,
+    add_known_network,
+    current_ssid,
+    disconnect_and_forget_current,
+    set_target_wifi,
+    set_change_callback,
+    check_adhoc_network,
+    check_wifi_connection,
+    run_cmd,
+    scanned_ssids,
+)
 
 # Global variables
 admin_connected = False  # Track if admin has connected
@@ -90,6 +101,7 @@ def recompute_network_status():
         'ssid': ssid,
         'adhoc_active': adhoc_active,
         'admin_url': admin_url,
+        'scanned_ssids': scanned_ssids
     })
 
 def reset_admin_connection():
@@ -494,6 +506,7 @@ def check_updates():
         'admin_connected': admin_connected,
         'ip': cache.get('admin_url'),
         'wifi_connected': cache.get('connected'),
+        'scanned_ssids': cache.get('scanned_ssids'),
         'ssid': cache.get('ssid'),
         'adhoc_active': cache.get('adhoc_active'),
         'adhoc_ssid': 'dmscreen' if cache.get('adhoc_active') else None,

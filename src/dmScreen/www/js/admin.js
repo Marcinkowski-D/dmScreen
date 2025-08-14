@@ -153,6 +153,9 @@ async function showConfirm(message, title = 'Confirmation') {
 let lastUpdateTimestamp = 0;
 const POLLING_INTERVAL = 2000; // Poll every 2 seconds
 
+// Track previous network signature to detect changes
+let _prevNetworkSignature = null;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -190,6 +193,39 @@ async function fetchUpdates() {
     try {
         const response = await fetch('/api/updates');
         const data = await response.json();
+
+        // Detect network change signature
+        const netSig = JSON.stringify({
+            instance_id: data.instance_id || null,
+            wifi_connected: data.wifi_connected || false,
+            ssid: data.ssid || null,
+            adhoc_active: data.adhoc_active || false,
+            ip: data.ip || null
+        });
+        if (_prevNetworkSignature === null) {
+            _prevNetworkSignature = netSig;
+        } else if (_prevNetworkSignature !== netSig) {
+            _prevNetworkSignature = netSig;
+            // Network conditions changed: refresh WiFi status in admin area
+            if (typeof checkWifiStatus === 'function') {
+                try { checkWifiStatus(); } catch (_) {}
+            }
+        }
+
+        // If AP/Adhoc is active, populate the SSID datalist for combo input
+        if (data.adhoc_active && Array.isArray(data.scanned_ssids) && wifiSSIDList) {
+            // Clear existing options
+            while (wifiSSIDList.firstChild) wifiSSIDList.removeChild(wifiSSIDList.firstChild);
+            const seen = new Set();
+            data.scanned_ssids.forEach(ssid => {
+                const s = String(ssid || '').trim();
+                if (!s || seen.has(s)) return;
+                seen.add(s);
+                const opt = document.createElement('option');
+                opt.value = s;
+                wifiSSIDList.appendChild(opt);
+            });
+        }
 
         // If there's a new update, fetch the current state
         if (data.timestamp > lastUpdateTimestamp) {
