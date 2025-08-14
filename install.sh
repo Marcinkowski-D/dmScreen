@@ -8,10 +8,10 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-echo "[*] Paketquellen aktualisieren …"
+echo "[*] Paketquellen aktualisieren ..."
 apt-get update -y
 
-echo "[*] Installiere erforderliche Pakete …"
+echo "[*] Installiere erforderliche Pakete ..."
 # hostapd/dnsmasq für AP, iw/wireless-tools für Scans, iproute2 für ip, dhclient für DHCP, rfkill zum Entsperren,
 # net-tools optional (ifconfig), wpasupplicant für Client-Betrieb, curl/git optional (Updater, Tools)
 apt-get install -y \
@@ -28,7 +28,7 @@ apt-get install -y \
   git
 
 # Dienste vorbereiten
-echo "[*] Dienste vorbereiten …"
+echo "[*] Dienste vorbereiten ..."
 systemctl unmask hostapd || true
 systemctl enable hostapd || true
 systemctl enable dnsmasq || true

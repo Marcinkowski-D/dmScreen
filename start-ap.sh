@@ -101,7 +101,7 @@ while [ $tries -lt 10 ]; do
 done
 
 if [ "$ok" -ne 1 ]; then
-  echo "[!] AP scheint nicht aktiv zu sein – versuche Neustart von hostapd …"
+  echo "[!] AP scheint nicht aktiv zu sein – versuche Neustart von hostapd ..."
   systemctl restart hostapd
   tries=0
   while [ $tries -lt 10 ]; do

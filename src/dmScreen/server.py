@@ -173,17 +173,17 @@ def bootstrap_network_on_start():
     If connection fails, keep AP running and wait for user network change.
     """
     try:
-        print("[WiFi] Bootstrap: stop AP …")
+        print("[WiFi] Bootstrap: stop AP ...")
         try:
             stop_adhoc_network()
         except Exception as e:
             print(f"[WiFi] Bootstrap: stop AP error: {e}")
-        print("[WiFi] Bootstrap: start AP …")
+        print("[WiFi] Bootstrap: start AP ...")
         try:
             create_adhoc_network()
         except Exception as e:
             print(f"[WiFi] Bootstrap: start AP error: {e}")
-        print("[WiFi] Bootstrap: try connect to best known network …")
+        print("[WiFi] Bootstrap: try connect to best known network ...")
         connected = False
         try:
             connected = connect_best_known_network()
