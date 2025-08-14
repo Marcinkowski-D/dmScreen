@@ -155,27 +155,10 @@ def _run_script(script_name: str, *script_args):
 def current_ssid(force: bool = False):
     return current_wifi
 
-def _stop_ap_services():
-    _dbg("Stoppe AP über Skript stop-ap.sh ...")
-    _run_script('stop-ap.sh')
-
 
 def _start_ap_services():
     _dbg("Starte AP über Skript start-ap.sh ...")
     _run_script('start-ap.sh')
-
-
-def stop_adhoc_network():
-    """Public wrapper to stop the ad-hoc AP via stop-ap.sh and clear AP cache."""
-    try:
-        _stop_ap_services()
-        with _wifi_cache_lock:
-            globals()['_cached_adhoc'] = False
-            globals()['_cached_adhoc_ts'] = time.time()
-        return True
-    except Exception:
-        return False
-
 
 
 def _write_wpa_supplicant(networks):
@@ -359,47 +342,6 @@ def _scan_visible_ssids():
 
 
 
-def connect_best_known_network():
-    """Try to connect to the best available known network using connect-wifi.sh; if none visible, caller can start AP."""
-    try:
-        _dbg("Beginne Versuch: Verbindung zum besten bekannten Netzwerk via Skript ...")
-        known = _load_known_networks()
-        _dbg(f"Bekannte Netzwerke: {len(known)} -> {[n.get('ssid') for n in known]}")
-        if not known:
-            _dbg("Keine bekannten Netzwerke vorhanden.")
-            return False
-        visible = _scan_visible_ssids()
-        _dbg(f"Sichtbare SSIDs: {sorted(list(visible))}")
-        if not visible:
-            _dbg("Kein WLAN sichtbar – Abbruch.")
-            return False
-        # Keep networks that are visible
-        candidates = [n for n in known if n.get('ssid') in visible]
-        _dbg(f"Kandidaten (bekannt & sichtbar): {[n.get('ssid') for n in candidates]}")
-        if not candidates:
-            _dbg("Keine Kandidaten – Abbruch.")
-            return False
-        # Stop AP and try candidates in order
-        _stop_ap_services()
-        for net in candidates:
-            ssid = net.get('ssid')
-            pwd = net.get('password') or ''
-            _dbg(f"Versuche Verbindung mit '{ssid}' über connect-wifi.sh ...")
-            _run_script('connect-wifi.sh', ssid, pwd)
-            # Poll a few times quickly
-            for i in range(6):
-                cur = current_ssid(force=True)
-                if cur == ssid:
-                    _dbg(f"Erfolgreich verbunden mit '{ssid}'.")
-                    return True
-                time.sleep(2)
-            _dbg(f"Konnte nicht mit '{ssid}' verbinden – probiere nächsten Kandidaten ...")
-        _dbg("Keine Verbindung zu Kandidaten möglich.")
-        return False
-    except Exception as e:
-        _dbg(f"connect_best_known_network Fehler: {type(e).__name__}: {e}")
-        return False
-
 
 def configure_wifi(ssid, password):
     """Add credentials to list and set target ssid"""
@@ -464,6 +406,8 @@ def wifi_monitor():
 
     while True:
         if target_wifi is None and current_wifi is not None:
+            print(f'target-wifi: {target_wifi}')
+            print(f'current-wifi: {current_wifi}')
             disconnect_and_forget_current()
             if change_callback:
                 try:
@@ -472,6 +416,8 @@ def wifi_monitor():
                     pass
 
         if target_wifi is not None and current_wifi != target_wifi:
+            print(f'target-wifi: {target_wifi}')
+            print(f'current-wifi: {current_wifi}')
             connect_network()
             if change_callback:
                 try:
