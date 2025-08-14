@@ -966,6 +966,10 @@ def get_image_url(image_id):
 # Flask route handlers for WiFi functionality
 def register_wifi_routes(app, on_change=None):
 
+    # Debug logging for WiFi
+    _DM_WIFI_DEBUG_ENV = os.getenv('DM_WIFI_DEBUG', '1')
+    _DEBUG_WIFI = not (_DM_WIFI_DEBUG_ENV.lower() in ('0', 'false', 'no', 'off', ''))
+
     def _ts():
         try:
             return time.strftime('%Y-%m-%d %H:%M:%S')
