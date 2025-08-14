@@ -342,6 +342,10 @@ def disconnect_and_forget_current():
         return False, None
 
 
+def get_scanned_ssids():
+    global scanned_ssids
+    return scanned_ssids
+
 def wifi_monitor():
     global target_wifi, current_wifi, change_callback, known_ssids, scanned_ssids
     """Background thread to ensure connectivity: connect to known networks, else start AP"""

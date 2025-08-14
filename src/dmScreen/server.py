@@ -61,7 +61,7 @@ from dmScreen.wifi import (
     check_adhoc_network,
     check_wifi_connection,
     run_cmd,
-    scanned_ssids,
+    get_scanned_ssids,
 )
 
 # Global variables
@@ -101,7 +101,7 @@ def recompute_network_status():
         'ssid': ssid,
         'adhoc_active': adhoc_active,
         'admin_url': admin_url,
-        'scanned_ssids': scanned_ssids
+        'scanned_ssids': get_scanned_ssids()
     })
 
 def reset_admin_connection():
