@@ -223,6 +223,7 @@ def create_adhoc_network():
         time.sleep(2)
         is_active = check_adhoc_network(force=True)
         _dbg(f"Ad-hoc-Netzwerk Status: {'aktiv' if is_active else 'inaktiv'}")
+        adhoic_running = is_active
         return is_active
     except Exception as e:
         _dbg(f"Fehler beim Erstellen des Ad-hoc-Netzwerks: {type(e).__name__}: {e}")
@@ -544,12 +545,9 @@ def wifi_monitor():
                 if connected:
                     _dbg(f"Monitor: Verbindung hergestellt. Aktuelle SSID={current_ssid()}")
                 else:
-                    _dbg("Monitor: Konnte keine Verbindung herstellen. Prüfe AP-Status …")
-                    if not check_adhoc_network():
-                        _dbg("Monitor: AP inaktiv – starte Ad-hoc-Netzwerk …")
+                    if not adhoc_running:
+                        _dbg("Monitor: Starte Ad-hoc-Netzwerk …")
                         create_adhoc_network()
-                    else:
-                        _dbg("Monitor: AP bereits aktiv – keine Aktion.")
         except Exception as e:
             _dbg(f"wifi_monitor loop error: {type(e).__name__}: {e}")
         time.sleep(60)  # Check every minute
