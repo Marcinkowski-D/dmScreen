@@ -1,5 +1,6 @@
 #!/bin/bash
-
+/bin/bash stop-ap.sh
+/bin/bash start-ap.sh
 dhclient eth0
 # Install the package from Git repository
 git checkout .
