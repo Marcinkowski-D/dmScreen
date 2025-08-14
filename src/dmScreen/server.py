@@ -52,7 +52,7 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, current_ssid
+from dmScreen.wifi import start_wifi_monitor, configure_wifi, current_ssid, disconnect_and_forget_current
 
 # Global variables
 admin_connected = False  # Track if admin has connected
@@ -1033,56 +1033,10 @@ def register_wifi_routes(app, on_change=None):
         _dbg(f"API /api/wifi/known -> {len(nets)} Netzwerke: {[n.get('ssid') for n in nets]}")
         return jsonify({'networks': nets})
 
-    @app.route('/api/wifi/known', methods=['POST'])
-    def api_add_known():
-        data = request.get_json() or {}
-        ssid = data.get('ssid')
-        password = data.get('password')
-        _dbg(f"API POST /api/wifi/known: ssid='{ssid}' password='****'")
-        if not ssid or not password:
-            _dbg("API /api/wifi/known: fehlende Felder -> 400")
-            return jsonify({'error': 'SSID and password are required'}), 400
-        add_known_network(ssid, password)
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
-        _dbg("API /api/wifi/known: Netzwerk gespeichert -> success=true")
-        return jsonify({'success': True})
-
-    @app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
-    def api_remove_known(ssid):
-        _dbg(f"API DELETE /api/wifi/known/{ssid} ...")
-        removed = remove_known_network(ssid)
-        _dbg(f"Known-Liste entfernt='{ssid}' -> removed={removed}")
-        # Also ensure OS forgets the network so it won't reconnect
-        try:
-            os_removed = _forget_network_everywhere(ssid)
-            _dbg(f"Runtime-Konfiguration vergessen für '{ssid}' -> {os_removed}")
-        except Exception as e:
-            _dbg(f"Fehler beim Forget in OS Runtime: {type(e).__name__}: {e}")
-        # Update wpa_supplicant to reflect removal
-        try:
-            nets = _load_known_networks()
-            _dbg(f"Schreibe wpa_supplicant nach Entfernen. Verbleibend: {len(nets)} Netzwerke ...")
-            _write_wpa_supplicant(nets)
-            _reconfigure_wpa()
-        except Exception as e:
-            _dbg(f"Fehler beim Aktualisieren von wpa_supplicant nach Entfernen: {type(e).__name__}: {e}")
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
-        return jsonify({'removed': removed})
-
-
     @app.route('/api/wifi/disconnect', methods=['POST'])
     def api_disconnect():
         _dbg("API POST /api/wifi/disconnect ...")
         success, ssid = disconnect_and_forget_current()
-        create_adhoc_network()
         _dbg(f"API /api/wifi/disconnect Ergebnis: success={success} | entfernte SSID={ssid}")
         if on_change:
             try:
@@ -1103,25 +1057,6 @@ def register_wifi_routes(app, on_change=None):
         'remove_known': api_remove_known,
         'disconnect': api_disconnect,
     }
-
-    @app.route('/api/wifi/configure_reset', methods=['POST'])
-    def set_wifi_config_reset():
-        data = request.get_json()
-        ssid = data.get('ssid')
-        password = data.get('password')
-
-        if not ssid or not password:
-            return jsonify({'error': 'SSID and password are required'}), 400
-
-        success = configure_wifi_wrapper(ssid, password)
-
-        return jsonify({
-            'success': success,
-            'message': (
-                "Connected. The new IP address is shown on the device's screen. You can close this tab."
-                if success else 'Failed to configure WiFi'
-            )
-        })
 
 
 def main():

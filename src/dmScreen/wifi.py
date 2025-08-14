@@ -143,104 +143,9 @@ def _run_script(script_name: str, *script_args):
     return _run_cmd(cmd)
 
 
-# WiFi-related functions
-
-def check_wifi_connection():
-    """Check if WiFi is connected"""
-    try:
-        ssid = current_ssid()
-        connected = ssid is not None
-        _dbg(f"WLAN-Verbindung prüfen: connected={connected} | SSID={ssid}")
-        return connected
-    except Exception as e:
-        _dbg(f"WLAN-Verbindung prüfen: Ausnahme {type(e).__name__}: {e}")
-        return False
-
 
 def current_ssid(force: bool = False):
-    """Return current connected SSID if available, else None (Raspberry Pi/Debian via iwgetid).
-    Uses 5s cache by default; set force=True to bypass cache.
-    """
-    now = time.time()
-    with _wifi_cache_lock:
-        if not force and (now - _cached_ssid_ts) < _WIFI_CACHE_TTL:
-            _dbg(f"Aktuelle SSID (Cache-Hit, Alter={int(now - _cached_ssid_ts)}s): {_cached_ssid}")
-            return _cached_ssid
-    _dbg("Ermittle aktuelle SSID via iwgetid -r ...")
-    res = _run_cmd(['iwgetid', '-r'])
-    ssid = None
-    if res.returncode == 0:
-        s = (res.stdout or '').strip()
-        if s:
-            _dbg(f"Aktuelle SSID erkannt: '{s}' (Interpretation: verbunden)")
-            ssid = s
-        else:
-            _dbg("iwgetid lieferte leeren String (Interpretation: nicht verbunden)")
-    else:
-        _dbg(f"iwgetid fehlgeschlagen rc={res.returncode} (Interpretation: Werkzeug nicht verfügbar oder kein Link)")
-    with _wifi_cache_lock:
-        globals()['_cached_ssid'] = ssid
-        globals()['_cached_ssid_ts'] = now
-    return ssid
-
-
-def check_adhoc_network(force: bool = False):
-    """Check if adhoc network (hostapd) is truly active.
-    Uses 5s cache unless force=True.
-    Criteria for 'active':
-      - wlan0 is in AP mode (iw dev wlan0 info shows 'type AP'), OR
-      - hostapd is active AND wlan0 has an IP in 192.168.4.0/24.
-    """
-    try:
-        now = time.time()
-        with _wifi_cache_lock:
-            if not force and (now - _cached_adhoc_ts) < _WIFI_CACHE_TTL:
-                _dbg(f"AP-Status (Cache-Hit, Alter={int(now - _cached_adhoc_ts)}s): {_cached_adhoc}")
-                return bool(_cached_adhoc)
-
-        # 1) Systemd service state
-        _dbg("Prüfe Ad-hoc (AP) Status: systemctl is-active hostapd ...")
-        result = _run_cmd(['systemctl', 'is-active', 'hostapd'])
-        status = (result.stdout or '').strip()
-        active_systemd = (status == 'active')
-        _dbg(f"hostapd Status: '{status}' (Interpretation: {'aktiv' if active_systemd else 'inaktiv'})")
-
-        # 2) Interface mode via iw (preferred)
-        ap_mode = False
-        res_iw = _run_cmd(['iw', 'dev', 'wlan0', 'info'])
-        if res_iw.returncode == 0 and res_iw.stdout:
-            iw_out = res_iw.stdout
-            if 'type AP' in iw_out or 'type __ap' in iw_out:
-                ap_mode = True
-        else:
-            # Fallback: iwconfig
-            res_iwc = _run_cmd(['iwconfig', 'wlan0'])
-            if res_iwc.returncode == 0 and res_iwc.stdout and ('Mode:Master' in res_iwc.stdout or 'Mode:AP' in res_iwc.stdout):
-                ap_mode = True
-        _dbg(f"AP-Mode erkannt (iw/iwconfig): {ap_mode}")
-
-        # 3) IP presence in AP subnet
-        ap_ip = None
-        res_ip = _run_cmd(['ip', '-4', 'addr', 'show', 'wlan0'])
-        if res_ip.returncode == 0 and res_ip.stdout:
-            for line in res_ip.stdout.splitlines():
-                line = line.strip()
-                if line.startswith('inet '):
-                    ip_cidr = line.split()[1]
-                    ap_ip = ip_cidr.split('/')[0]
-                    break
-        ap_ip_in_subnet = bool(ap_ip and ap_ip.startswith('192.168.4.'))
-        _dbg(f"wlan0 IP: {ap_ip or '-'} | in AP-Subnetz: {ap_ip_in_subnet}")
-
-        active_true = ap_mode or (active_systemd and ap_ip_in_subnet)
-        with _wifi_cache_lock:
-            globals()['_cached_adhoc'] = bool(active_true)
-            globals()['_cached_adhoc_ts'] = now
-        return bool(active_true)
-    except Exception as e:
-        _dbg(f"Fehler beim Prüfen von hostapd/AP-Status: {type(e).__name__}: {e}")
-        return False
-
+    return current_wifi
 
 def _stop_ap_services():
     _dbg("Stoppe AP über Skript stop-ap.sh ...")
@@ -263,39 +168,6 @@ def stop_adhoc_network():
     except Exception:
         return False
 
-
-
-def create_adhoc_network():
-    """Create an ad-hoc AP if no WiFi connected by invoking start-ap.sh.
-    Robust: start, poll for true AP state; if not active, restart once and poll again.
-    """
-    try:
-        _dbg("Starte Erstellung/Start des Ad-hoc-Netzwerks via start-ap.sh ...")
-        _start_ap_services()
-        # Poll quickly for a short period
-        for i in range(6):  # ~6 seconds total
-            time.sleep(1)
-            is_active = check_adhoc_network(force=True)
-            _dbg(f"AP-Poll {i+1}/6 -> {'aktiv' if is_active else 'inaktiv'}")
-            if is_active:
-                _dbg("Ad-hoc-Netzwerk aktiv.")
-                return True
-        _dbg("AP nach erster Startsequenz nicht aktiv – versuche Neustart ...")
-        _stop_ap_services()
-        time.sleep(1)
-        _start_ap_services()
-        for i in range(10):  # allow a bit longer after restart
-            time.sleep(1)
-            is_active = check_adhoc_network(force=True)
-            _dbg(f"AP-Poll (Restart) {i+1}/10 -> {'aktiv' if is_active else 'inaktiv'}")
-            if is_active:
-                _dbg("Ad-hoc-Netzwerk aktiv nach Neustart.")
-                return True
-        _dbg("Ad-hoc-Netzwerk konnte nicht aktiviert werden.")
-        return False
-    except Exception as e:
-        _dbg(f"Fehler beim Erstellen des Ad-hoc-Netzwerks: {type(e).__name__}: {e}")
-        return False
 
 
 def _write_wpa_supplicant(networks):
@@ -522,39 +394,34 @@ def connect_best_known_network():
 
 
 def configure_wifi(ssid, password):
-    """Configure WiFi via scripts: stop AP, connect to SSID with password, and persist credentials."""
+    """Add credentials to list and set target ssid"""
     try:
         _dbg(f"Konfiguriere WLAN via Skript: gewünschte SSID='{ssid}' ...")
         add_known_network(ssid, password)
-        _stop_ap_services()
-        _run_script('connect-wifi.sh', ssid, password)
-        _dbg(f"Starte Polling (max {_WIFI_POLL_TRIES * _WIFI_POLL_INTERVAL:.0f}s, Intervall={_WIFI_POLL_INTERVAL}s) auf Ziel-SSID ...")
-        for i in range(_WIFI_POLL_TRIES):
-            cur = current_ssid(force=True)
-            _dbg(f"Polling {i+1}/{_WIFI_POLL_TRIES}: aktuelle SSID={cur} | Ziel={ssid} | Interpretation: {'OK' if cur == ssid else 'noch nicht verbunden'}")
-            if cur == ssid:
-                _dbg("Ziel-SSID verbunden – Erfolg.")
-                return True
-            time.sleep(_WIFI_POLL_INTERVAL)
-        _dbg("Verbindungsaufbau innerhalb des Zeitfensters nicht erfolgt – Misserfolg.")
-        return False
+        target_wifi = ssid
+        return True
     except Exception as e:
         _dbg(f"Error configuring WiFi: {type(e).__name__}: {e}")
         return False
+
+def connect_network():
+    global target_wifi
+    known_ssids = _load_known_networks()
+    conf = next((s for s in known_ssids if s['ssid'] == target_wifi), None)
+    _run_script('stop-ap.sh')
+    _run_script('connect-wifi.sh', conf['ssid'], conf['password'])
+
 
 
 def disconnect_and_forget_current():
     """Disconnect from the currently connected WiFi using forget-wifi.sh, update known list, and start AP. Returns (success, ssid)."""
     try:
-        _dbg("Starte Disconnect via Skript und Entfernen des aktuellen WLANs ...")
-        ssid = current_ssid(force=True)
-        _dbg(f"Aktueller Zustand vor Disconnect: SSID={ssid}")
-        # Call forget script (may fail if not connected; ignore rc)
+
         _run_script('forget-wifi.sh')
         # Remove from known networks if present
         if ssid:
             try:
-                removed_known = remove_known_network(ssid)
+                removed_known = remove_known_network(current_wifi)
                 _dbg(f"Entferne aus Known-Liste: ssid='{ssid}' -> removed={removed_known}")
             except Exception as e:
                 _dbg(f"Fehler beim Entfernen aus Known-Liste: {type(e).__name__}: {e}")
@@ -579,15 +446,20 @@ def wifi_monitor():
     known_ssids = _load_known_networks()
     time.sleep(1)
 
-    print(ssids)
-    print(known_ssids)
+    for k_ssid in known_ssids:
+        if k_ssid['ssid'] in ssids:
+            target_wifi = k_ssid['ssid']
+            break
 
 
     while True:
         if target_wifi is None and current_wifi is not None:
-            _forget_network_everywhere(current_wifi)
+            disconnect_and_forget_current()
 
-        time.sleep(60)
+        if target_wifi is not None and current_wifi != target_wifi:
+            connect_network()
+
+        time.sleep(1)
 
 
 
