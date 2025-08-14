@@ -41,7 +41,8 @@ def get_lan_ip():
         p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*' | head -n 1")
         print(p.stdout)
         return p.stdout.decode('utf-8').strip()
-    except:
+    except Exception as e:
+        print(f"Error getting LAN IP address: {e}")
         return "127.0.0.1"
 
 from dmScreen.updater import check_for_update
