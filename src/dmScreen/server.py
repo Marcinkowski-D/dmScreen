@@ -209,7 +209,7 @@ def index():
 def admin():
     global admin_connected
     # Set admin_connected to True when admin page is accessed
-    admin_connected = True
+    # admin_connected = True ## DEBUG
     update_timestamp()
     
     admin_path = os.path.join(WWW_FOLDER, 'admin.html')
@@ -493,6 +493,7 @@ def check_updates():
         if 'admin_url' not in cache:
             recompute_network_status()
             cache = NETWORK_STATUS_CACHE
+        print(f"Network status cache: {cache}")
     except Exception:
         recompute_network_status()
         cache = NETWORK_STATUS_CACHE

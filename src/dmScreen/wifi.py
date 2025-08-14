@@ -424,7 +424,6 @@ def wifi_monitor():
             target_wifi = k_ssid['ssid']
             break
 
-
     while True:
         if target_wifi is None and current_wifi is not None:
             print(f'target-wifi: {target_wifi}')
