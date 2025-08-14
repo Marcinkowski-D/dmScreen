@@ -143,7 +143,7 @@ def _run_cmd(args, check=False):
         out = (res.stdout or '').strip()
         err = (res.stderr or '').strip()
         interpretation = 'OK' if res.returncode == 0 else 'FEHLER'
-        _dbg(f"CMD Ergebnis ({duration} ms): rc={res.returncode} | stdout='{out[:1000]}' | stderr='{err[:1000]}' | Interpretation: {interpretation}")
+        # _dbg(f"CMD Ergebnis ({duration} ms): rc={res.returncode} | stdout='{out[:1000]}' | stderr='{err[:1000]}' | Interpretation: {interpretation}")
         return res
     except Exception as e:
         duration = int((time.time() - start) * 1000)
@@ -413,6 +413,7 @@ def wifi_monitor():
     while scanned_ssids is None or len(scanned_ssids) == 0:
         scanned_ssids = _scan_visible_ssids()
     known_ssids = _load_known_networks()
+    print(f'known_ssids: {known_ssids}')
 
     for k_ssid in known_ssids:
         if k_ssid['ssid'] in scanned_ssids:
