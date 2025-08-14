@@ -102,18 +102,8 @@ def reset_admin_connection():
     admin_connected = False
     last_network_change = time.time()
     print("Network configuration changed, reset admin connection status")
-    # Recompute network status cache and bump update timestamp so UI reflects changes
-    try:
-        recompute_network_status()
-    except Exception:
-        pass
     try:
         update_timestamp()
-    except Exception:
-        pass
-    # Wake the WiFi monitor to reconcile immediately
-    try:
-        wifi_reconcile_event.set()
     except Exception:
         pass
 
