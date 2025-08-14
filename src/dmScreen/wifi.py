@@ -47,6 +47,8 @@ _WIFI_POLL_TRIES = int(os.getenv('DM_WIFI_POLL_TRIES', '10'))
 # Control whether we temporarily pause AP to perform scans (helps when interface is busy)
 _WIFI_SCAN_PAUSE_AP = not (os.getenv('DM_WIFI_SCAN_PAUSE_AP', '0').lower() in ('0', 'false', 'no', 'off', ''))
 
+target_wifi = None
+
 # -----------------------------
 # Helpers for known networks
 # -----------------------------
@@ -566,6 +568,7 @@ def disconnect_and_forget_current():
 
 
 def wifi_monitor():
+    global target_wifi
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
 
@@ -578,148 +581,26 @@ def wifi_monitor():
     print(ssids)
     print(known_ssids)
 
-    #
-    # while True:
-    #     try:
-    #         cur = current_ssid()
-    #         if cur:
-    #             _dbg(f"Monitor: Bereits verbunden mit SSID='{cur}'.")
-    #         else:
-    #             _dbg("Monitor: Nicht verbunden – versuche bekannte Netzwerke ...")
-    #             # Try connect to the best known network first
-    #             connected = connect_best_known_network()
-    #             if connected:
-    #                 _dbg(f"Monitor: Verbindung hergestellt. Aktuelle SSID={current_ssid()}")
-    #             else:
-    #                 if not check_adhoc_network(force=True):
-    #                     _dbg("Monitor: Starte Ad-hoc-Netzwerk ...")
-    #                     create_adhoc_network()
-    #     except Exception as e:
-    #         _dbg(f"wifi_monitor loop error: {type(e).__name__}: {e}")
-    #     time.sleep(60)  # Check every minute
 
-# Flask route handlers for WiFi functionality
-def register_wifi_routes(app, on_change=None):
-    @app.route('/api/wifi/status', methods=['GET'])
-    def get_wifi_status():
-        _dbg("API GET /api/wifi/status aufgerufen ...")
-        connected = check_wifi_connection()
-        adhoc_active = False
-        adhoc_ssid = None
-        if not connected:
-            adhoc_active = check_adhoc_network()
-            if adhoc_active:
-                adhoc_ssid = 'dmscreen'
-        ssid_val = current_ssid() if connected else None
-        _dbg(f"API /api/wifi/status Antwort: connected={connected} | ssid={ssid_val} | adhoc_active={adhoc_active} | adhoc_ssid={adhoc_ssid}")
-        return jsonify({
-            'connected': connected,
-            'ssid': ssid_val,
-            'adhoc_active': adhoc_active,
-            'adhoc_ssid': adhoc_ssid
-        })
-
-    @app.route('/api/wifi/configure', methods=['POST'])
-    def set_wifi_config():
-        data = request.get_json() or {}
-        ssid = data.get('ssid')
-        password = data.get('password')
-        _dbg(f"API POST /api/wifi/configure: ssid='{ssid}' password='****'")
-        if not ssid or not password:
-            _dbg("API /api/wifi/configure: fehlende Felder -> 400")
-            return jsonify({'error': 'SSID and password are required'}), 400
-        success = configure_wifi(ssid, password)
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
-        _dbg(f"API /api/wifi/configure Ergebnis: success={success}")
-        return jsonify({
-            'success': success,
-            'message': (
-                "Connected. The new IP address is shown on the device's screen. You can close this tab."
-                if success else 'Failed to configure WiFi'
-            )
-        })
-
-    @app.route('/api/wifi/known', methods=['GET'])
-    def api_list_known():
-        _dbg("API GET /api/wifi/known ...")
-        nets = list_known_networks()
-        _dbg(f"API /api/wifi/known -> {len(nets)} Netzwerke: {[n.get('ssid') for n in nets]}")
-        return jsonify({'networks': nets})
-
-    @app.route('/api/wifi/known', methods=['POST'])
-    def api_add_known():
-        data = request.get_json() or {}
-        ssid = data.get('ssid')
-        password = data.get('password')
-        _dbg(f"API POST /api/wifi/known: ssid='{ssid}' password='****'")
-        if not ssid or not password:
-            _dbg("API /api/wifi/known: fehlende Felder -> 400")
-            return jsonify({'error': 'SSID and password are required'}), 400
-        add_known_network(ssid, password)
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
-        _dbg("API /api/wifi/known: Netzwerk gespeichert -> success=true")
-        return jsonify({'success': True})
-
-    @app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
-    def api_remove_known(ssid):
-        _dbg(f"API DELETE /api/wifi/known/{ssid} ...")
-        removed = remove_known_network(ssid)
-        _dbg(f"Known-Liste entfernt='{ssid}' -> removed={removed}")
-        # Also ensure OS forgets the network so it won't reconnect
+    while True:
         try:
-            os_removed = _forget_network_everywhere(ssid)
-            _dbg(f"Runtime-Konfiguration vergessen für '{ssid}' -> {os_removed}")
+            cur = current_ssid()
+            if cur:
+                _dbg(f"Monitor: Bereits verbunden mit SSID='{cur}'.")
+            else:
+                _dbg("Monitor: Nicht verbunden – versuche bekannte Netzwerke ...")
+                # Try connect to the best known network first
+                connected = connect_best_known_network()
+                if connected:
+                    _dbg(f"Monitor: Verbindung hergestellt. Aktuelle SSID={current_ssid()}")
+                else:
+                    if not check_adhoc_network(force=True):
+                        _dbg("Monitor: Starte Ad-hoc-Netzwerk ...")
+                        create_adhoc_network()
         except Exception as e:
-            _dbg(f"Fehler beim Forget in OS Runtime: {type(e).__name__}: {e}")
-        # Update wpa_supplicant to reflect removal
-        try:
-            nets = _load_known_networks()
-            _dbg(f"Schreibe wpa_supplicant nach Entfernen. Verbleibend: {len(nets)} Netzwerke ...")
-            _write_wpa_supplicant(nets)
-            _reconfigure_wpa()
-        except Exception as e:
-            _dbg(f"Fehler beim Aktualisieren von wpa_supplicant nach Entfernen: {type(e).__name__}: {e}")
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
-        return jsonify({'removed': removed})
+            _dbg(f"wifi_monitor loop error: {type(e).__name__}: {e}")
+        time.sleep(60)  # Check every minute
 
-
-    @app.route('/api/wifi/disconnect', methods=['POST'])
-    def api_disconnect():
-        _dbg("API POST /api/wifi/disconnect ...")
-        success, ssid = disconnect_and_forget_current()
-        create_adhoc_network()
-        _dbg(f"API /api/wifi/disconnect Ergebnis: success={success} | entfernte SSID={ssid}")
-        if on_change:
-            try:
-                on_change()
-            except Exception:
-                pass
-        msg = (
-            'Wifi disconnected, use AP "dmscreen" (password "dmscreen") and navigate to 192.168.4.1 to continue. You can close this tab.'
-            if success else 'Failed to disconnect WiFi'
-        )
-        return jsonify({'success': success, 'ssid': ssid, 'message': msg})
-
-    return {
-        'get_wifi_status': get_wifi_status,
-        'set_wifi_config': set_wifi_config,
-        'list_known': api_list_known,
-        'add_known': api_add_known,
-        'remove_known': api_remove_known,
-        'disconnect': api_disconnect,
-    }
 
 
 def start_wifi_monitor():

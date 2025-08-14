@@ -133,98 +133,6 @@ def create_adhoc_network_wrapper():
         reset_admin_connection()
     return result
 
-# Event-driven WiFi monitor: reconcile only on boot or explicit changes
-def wifi_monitor_wrapper():
-    """Background thread that reconciles WiFi state when wifi_reconcile_event is set.
-    Order: Prefer staying on WiFi if connected; only start AP when not connected and connection attempts fail.
-    """
-    while True:
-        try:
-            # Wait until someone signals a network change or initial boot
-            wifi_reconcile_event.wait()
-            # Clear the event so subsequent changes can trigger again
-            wifi_reconcile_event.clear()
-
-            # If already connected to WiFi, do not start AP; optionally ensure AP services are stopped
-            if check_wifi_connection():
-                try:
-                    if check_adhoc_network():
-                        stop_adhoc_network()
-                        reset_admin_connection()
-                except Exception:
-                    pass
-                continue
-
-            # Not connected: first try connecting to best known networks (this stops AP internally)
-            if connect_best_known_network():
-                reset_admin_connection()
-                continue
-
-            # If connection failed, ensure AP is active for admin access
-            if not check_adhoc_network():
-                create_adhoc_network_wrapper()
-        except Exception as e:
-            print(f"wifi_monitor_wrapper error: {e}")
-
-
-def bootstrap_network_on_start():
-    """One-time startup sequence:
-    1) stop-ap.sh, 2) start-ap.sh (ensure AP), 3) try to connect to known WiFi once.
-    If connection fails, keep AP running and wait for user network change.
-    """
-    try:
-        print("[WiFi] Bootstrap: stop AP ...")
-        try:
-            stop_adhoc_network()
-        except Exception as e:
-            print(f"[WiFi] Bootstrap: stop AP error: {e}")
-        print("[WiFi] Bootstrap: start AP ...")
-        try:
-            create_adhoc_network()
-        except Exception as e:
-            print(f"[WiFi] Bootstrap: start AP error: {e}")
-        print("[WiFi] Bootstrap: try connect to best known network ...")
-        connected = False
-        try:
-            connected = connect_best_known_network()
-        except Exception as e:
-            print(f"[WiFi] Bootstrap: connect attempt error: {e}")
-        if connected:
-            print("[WiFi] Bootstrap: connected to known WiFi.")
-            # Update cached status and timestamp once (do not trigger monitor event)
-            try:
-                recompute_network_status()
-            except Exception:
-                pass
-            try:
-                update_timestamp()
-            except Exception:
-                pass
-        else:
-            print("[WiFi] Bootstrap: no WiFi connected, keep AP active.")
-            # Ensure AP is active for admin access
-            try:
-                create_adhoc_network()
-            except Exception:
-                pass
-            # Update cached status and timestamp once
-            try:
-                recompute_network_status()
-            except Exception:
-                pass
-            try:
-                update_timestamp()
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"[WiFi] Bootstrap error: {e}")
-
-
-def start_wifi_monitor_wrapper():
-    """Start the event-driven WiFi monitoring thread without triggering an initial reconcile."""
-    # Start background thread; it will wait for wifi_reconcile_event set by GUI actions
-    t = threading.Thread(target=wifi_monitor_wrapper, daemon=True)
-    t.start()
 
 # Configuration
 BASE_DIR = os.getcwd()
@@ -1054,6 +962,151 @@ def get_image_url(image_id):
         'name': image['name']
     })
 
+
+
+# Flask route handlers for WiFi functionality
+def register_wifi_routes(app, on_change=None):
+    @app.route('/api/wifi/status', methods=['GET'])
+    def get_wifi_status():
+        _dbg("API GET /api/wifi/status aufgerufen ...")
+        connected = check_wifi_connection()
+        adhoc_active = False
+        adhoc_ssid = None
+        if not connected:
+            adhoc_active = check_adhoc_network()
+            if adhoc_active:
+                adhoc_ssid = 'dmscreen'
+        ssid_val = current_ssid() if connected else None
+        _dbg(f"API /api/wifi/status Antwort: connected={connected} | ssid={ssid_val} | adhoc_active={adhoc_active} | adhoc_ssid={adhoc_ssid}")
+        return jsonify({
+            'connected': connected,
+            'ssid': ssid_val,
+            'adhoc_active': adhoc_active,
+            'adhoc_ssid': adhoc_ssid
+        })
+
+    @app.route('/api/wifi/configure', methods=['POST'])
+    def set_wifi_config():
+        data = request.get_json() or {}
+        ssid = data.get('ssid')
+        password = data.get('password')
+        _dbg(f"API POST /api/wifi/configure: ssid='{ssid}' password='****'")
+        if not ssid or not password:
+            _dbg("API /api/wifi/configure: fehlende Felder -> 400")
+            return jsonify({'error': 'SSID and password are required'}), 400
+        success = configure_wifi(ssid, password)
+        if on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        _dbg(f"API /api/wifi/configure Ergebnis: success={success}")
+        return jsonify({
+            'success': success,
+            'message': (
+                "Connected. The new IP address is shown on the device's screen. You can close this tab."
+                if success else 'Failed to configure WiFi'
+            )
+        })
+
+    @app.route('/api/wifi/known', methods=['GET'])
+    def api_list_known():
+        _dbg("API GET /api/wifi/known ...")
+        nets = list_known_networks()
+        _dbg(f"API /api/wifi/known -> {len(nets)} Netzwerke: {[n.get('ssid') for n in nets]}")
+        return jsonify({'networks': nets})
+
+    @app.route('/api/wifi/known', methods=['POST'])
+    def api_add_known():
+        data = request.get_json() or {}
+        ssid = data.get('ssid')
+        password = data.get('password')
+        _dbg(f"API POST /api/wifi/known: ssid='{ssid}' password='****'")
+        if not ssid or not password:
+            _dbg("API /api/wifi/known: fehlende Felder -> 400")
+            return jsonify({'error': 'SSID and password are required'}), 400
+        add_known_network(ssid, password)
+        if on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        _dbg("API /api/wifi/known: Netzwerk gespeichert -> success=true")
+        return jsonify({'success': True})
+
+    @app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
+    def api_remove_known(ssid):
+        _dbg(f"API DELETE /api/wifi/known/{ssid} ...")
+        removed = remove_known_network(ssid)
+        _dbg(f"Known-Liste entfernt='{ssid}' -> removed={removed}")
+        # Also ensure OS forgets the network so it won't reconnect
+        try:
+            os_removed = _forget_network_everywhere(ssid)
+            _dbg(f"Runtime-Konfiguration vergessen für '{ssid}' -> {os_removed}")
+        except Exception as e:
+            _dbg(f"Fehler beim Forget in OS Runtime: {type(e).__name__}: {e}")
+        # Update wpa_supplicant to reflect removal
+        try:
+            nets = _load_known_networks()
+            _dbg(f"Schreibe wpa_supplicant nach Entfernen. Verbleibend: {len(nets)} Netzwerke ...")
+            _write_wpa_supplicant(nets)
+            _reconfigure_wpa()
+        except Exception as e:
+            _dbg(f"Fehler beim Aktualisieren von wpa_supplicant nach Entfernen: {type(e).__name__}: {e}")
+        if on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        return jsonify({'removed': removed})
+
+
+    @app.route('/api/wifi/disconnect', methods=['POST'])
+    def api_disconnect():
+        _dbg("API POST /api/wifi/disconnect ...")
+        success, ssid = disconnect_and_forget_current()
+        create_adhoc_network()
+        _dbg(f"API /api/wifi/disconnect Ergebnis: success={success} | entfernte SSID={ssid}")
+        if on_change:
+            try:
+                on_change()
+            except Exception:
+                pass
+        msg = (
+            'Wifi disconnected, use AP "dmscreen" (password "dmscreen") and navigate to 192.168.4.1 to continue. You can close this tab.'
+            if success else 'Failed to disconnect WiFi'
+        )
+        return jsonify({'success': success, 'ssid': ssid, 'message': msg})
+
+    return {
+        'get_wifi_status': get_wifi_status,
+        'set_wifi_config': set_wifi_config,
+        'list_known': api_list_known,
+        'add_known': api_add_known,
+        'remove_known': api_remove_known,
+        'disconnect': api_disconnect,
+    }
+
+    @app.route('/api/wifi/configure_reset', methods=['POST'])
+    def set_wifi_config_reset():
+        data = request.get_json()
+        ssid = data.get('ssid')
+        password = data.get('password')
+
+        if not ssid or not password:
+            return jsonify({'error': 'SSID and password are required'}), 400
+
+        success = configure_wifi_wrapper(ssid, password)
+
+        return jsonify({
+            'success': success,
+            'message': (
+                "Connected. The new IP address is shown on the device's screen. You can close this tab."
+                if success else 'Failed to configure WiFi'
+            )
+        })
+
+
 def main():
     global db
     # Initialize database
@@ -1064,38 +1117,20 @@ def main():
     print('initializing background caching system')
     init_cache_system(CACHE_FOLDER, UPLOAD_FOLDER)
 
-    # Register WiFi routes with on_change callback to reset admin connection
-    register_wifi_routes(app, on_change=reset_admin_connection)
     
     # Add custom route for WiFi configuration that resets admin connection
-    @app.route('/api/wifi/configure_reset', methods=['POST'])
-    def set_wifi_config_reset():
-        data = request.get_json()
-        ssid = data.get('ssid')
-        password = data.get('password')
-        
-        if not ssid or not password:
-            return jsonify({'error': 'SSID and password are required'}), 400
-        
-        success = configure_wifi_wrapper(ssid, password)
-        
-        return jsonify({
-            'success': success,
-            'message': (
-                "Connected. The new IP address is shown on the device's screen. You can close this tab."
-                if success else 'Failed to configure WiFi'
-            )
-        })
+
 
     print('looking if linux')
     # Start WiFi monitoring in background (only on Raspberry Pi)
     if hasattr(os, 'uname'):
         if "Raspbian" in os.uname().version:
             print('is linux!')
-            # One-time bootstrap: stop AP -> start AP -> try WiFi connect
-            bootstrap_network_on_start()
+            # Register WiFi routes with on_change callback to reset admin connection
+            register_wifi_routes(app, on_change=reset_admin_connection)
+
             # Start monitor thread that waits for GUI-triggered changes
-            start_wifi_monitor_wrapper()
+            start_wifi_monitor()
         else:
             print('not Raspberry Pi!')
     else:
