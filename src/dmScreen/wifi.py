@@ -21,6 +21,9 @@ _DEBUG_WIFI = not (_DM_WIFI_DEBUG_ENV.lower() in ('0', 'false', 'no', 'off', '')
 
 config_lock = Lock()
 
+known_ssids = []
+scanned_ssids = []
+
 def _ts():
     try:
         return time.strftime('%Y-%m-%d %H:%M:%S')
@@ -357,13 +360,19 @@ def configure_wifi(ssid, password):
 def connect_network():
     global target_wifi, current_wifi, config_lock
     with config_lock:
-        current_wifi = target_wifi
         known_ssids = _load_known_networks()
         conf = next((s for s in known_ssids if s['ssid'] == target_wifi), None)
         _run_script('stop-ap.sh')
         _run_script('connect-wifi.sh', conf['ssid'], conf['password'])
+        current_wifi = target_wifi
 
+def check_adhoc_network():
+    global target_wifi, current_wifi
+    return target_wifi is None and current_wifi is None
 
+def check_wifi_connection():
+    global target_wifi, current_wifi
+    return target_wifi is not None and target_wifi == current_wifi
 
 def disconnect_and_forget_current():
 
@@ -391,10 +400,10 @@ def disconnect_and_forget_current():
 
 
 def wifi_monitor():
-    global target_wifi, current_wifi, change_callback
+    global target_wifi, current_wifi, change_callback, known_ssids, scanned_ssids
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
-    ssids = _scan_visible_ssids()
+    scanned_ssids = _scan_visible_ssids()
     known_ssids = _load_known_networks()
     time.sleep(1)
 
