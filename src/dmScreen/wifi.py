@@ -182,24 +182,60 @@ def current_ssid(force: bool = False):
 
 
 def check_adhoc_network(force: bool = False):
-    """Check if adhoc network (hostapd) is active. Uses 5s cache unless force=True."""
+    """Check if adhoc network (hostapd) is truly active.
+    Uses 5s cache unless force=True.
+    Criteria for 'active':
+      - wlan0 is in AP mode (iw dev wlan0 info shows 'type AP'), OR
+      - hostapd is active AND wlan0 has an IP in 192.168.4.0/24.
+    """
     try:
         now = time.time()
         with _wifi_cache_lock:
             if not force and (now - _cached_adhoc_ts) < _WIFI_CACHE_TTL:
                 _dbg(f"AP-Status (Cache-Hit, Alter={int(now - _cached_adhoc_ts)}s): {_cached_adhoc}")
                 return bool(_cached_adhoc)
+
+        # 1) Systemd service state
         _dbg("Prüfe Ad-hoc (AP) Status: systemctl is-active hostapd …")
         result = _run_cmd(['systemctl', 'is-active', 'hostapd'])
         status = (result.stdout or '').strip()
-        active = status == 'active'
-        _dbg(f"hostapd Status: '{status}' (Interpretation: {'aktiv' if active else 'inaktiv'})")
+        active_systemd = (status == 'active')
+        _dbg(f"hostapd Status: '{status}' (Interpretation: {'aktiv' if active_systemd else 'inaktiv'})")
+
+        # 2) Interface mode via iw (preferred)
+        ap_mode = False
+        res_iw = _run_cmd(['iw', 'dev', 'wlan0', 'info'])
+        if res_iw.returncode == 0 and res_iw.stdout:
+            iw_out = res_iw.stdout
+            if 'type AP' in iw_out or 'type __ap' in iw_out:
+                ap_mode = True
+        else:
+            # Fallback: iwconfig
+            res_iwc = _run_cmd(['iwconfig', 'wlan0'])
+            if res_iwc.returncode == 0 and res_iwc.stdout and ('Mode:Master' in res_iwc.stdout or 'Mode:AP' in res_iwc.stdout):
+                ap_mode = True
+        _dbg(f"AP-Mode erkannt (iw/iwconfig): {ap_mode}")
+
+        # 3) IP presence in AP subnet
+        ap_ip = None
+        res_ip = _run_cmd(['ip', '-4', 'addr', 'show', 'wlan0'])
+        if res_ip.returncode == 0 and res_ip.stdout:
+            for line in res_ip.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('inet '):
+                    ip_cidr = line.split()[1]
+                    ap_ip = ip_cidr.split('/')[0]
+                    break
+        ap_ip_in_subnet = bool(ap_ip and ap_ip.startswith('192.168.4.'))
+        _dbg(f"wlan0 IP: {ap_ip or '-'} | in AP-Subnetz: {ap_ip_in_subnet}")
+
+        active_true = ap_mode or (active_systemd and ap_ip_in_subnet)
         with _wifi_cache_lock:
-            globals()['_cached_adhoc'] = active
+            globals()['_cached_adhoc'] = bool(active_true)
             globals()['_cached_adhoc_ts'] = now
-        return active
+        return bool(active_true)
     except Exception as e:
-        _dbg(f"Fehler beim Prüfen von hostapd: {type(e).__name__}: {e}")
+        _dbg(f"Fehler beim Prüfen von hostapd/AP-Status: {type(e).__name__}: {e}")
         return False
 
 
@@ -215,15 +251,33 @@ def _start_ap_services():
 
 
 def create_adhoc_network():
-    """Create an ad-hoc AP if no WiFi connected by invoking start-ap.sh."""
+    """Create an ad-hoc AP if no WiFi connected by invoking start-ap.sh.
+    Robust: start, poll for true AP state; if not active, restart once and poll again.
+    """
     try:
         _dbg("Starte Erstellung/Start des Ad-hoc-Netzwerks via start-ap.sh …")
         _start_ap_services()
-        _dbg("Warte 2s und prüfe dann den AP-Status …")
-        time.sleep(2)
-        is_active = check_adhoc_network(force=True)
-        _dbg(f"Ad-hoc-Netzwerk Status: {'aktiv' if is_active else 'inaktiv'}")
-        return is_active
+        # Poll quickly for a short period
+        for i in range(6):  # ~6 seconds total
+            time.sleep(1)
+            is_active = check_adhoc_network(force=True)
+            _dbg(f"AP-Poll {i+1}/6 -> {'aktiv' if is_active else 'inaktiv'}")
+            if is_active:
+                _dbg("Ad-hoc-Netzwerk aktiv.")
+                return True
+        _dbg("AP nach erster Startsequenz nicht aktiv – versuche Neustart …")
+        _stop_ap_services()
+        time.sleep(1)
+        _start_ap_services()
+        for i in range(10):  # allow a bit longer after restart
+            time.sleep(1)
+            is_active = check_adhoc_network(force=True)
+            _dbg(f"AP-Poll (Restart) {i+1}/10 -> {'aktiv' if is_active else 'inaktiv'}")
+            if is_active:
+                _dbg("Ad-hoc-Netzwerk aktiv nach Neustart.")
+                return True
+        _dbg("Ad-hoc-Netzwerk konnte nicht aktiviert werden.")
+        return False
     except Exception as e:
         _dbg(f"Fehler beim Erstellen des Ad-hoc-Netzwerks: {type(e).__name__}: {e}")
         return False
