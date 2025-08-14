@@ -1,5 +1,6 @@
 #!/bin/bash
 
+dhclient eth0
 # Install the package from Git repository
 git pull
 chmod +x connect-wifi.sh
