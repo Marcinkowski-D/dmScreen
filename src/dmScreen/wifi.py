@@ -464,7 +464,6 @@ def _scan_visible_ssids():
 
     ssids_local = set()
     res_local = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
-    print(res_local.stdout)
     if res_local.returncode == 0 and res_local.stdout:
         _dbg("Nutze Ergebnisse von 'iw dev wlan0 scan' ...")
         for line in res_local.stdout.splitlines():
@@ -476,7 +475,7 @@ def _scan_visible_ssids():
         _dbg(f"Gefundene SSIDs via iw: {sorted(list(ssids_local))}")
     else:
         _dbg("'iw dev wlan0 scan' lieferte keine verwertbaren Daten")
-    return ssids_local
+    return sorted(list(ssids_local))
 
 
 

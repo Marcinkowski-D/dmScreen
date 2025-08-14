@@ -7,7 +7,6 @@ import threading
 import concurrent.futures
 from datetime import datetime
 import hashlib
-from xmlrpc.client import DateTime
 
 import dotenv
 
@@ -53,7 +52,7 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network, current_ssid, stop_adhoc_network
+from dmScreen.wifi import start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, current_ssid
 
 # Global variables
 admin_connected = False  # Track if admin has connected
@@ -966,6 +965,20 @@ def get_image_url(image_id):
 
 # Flask route handlers for WiFi functionality
 def register_wifi_routes(app, on_change=None):
+
+    def _ts():
+        try:
+            return time.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return ''
+
+    def _dbg(msg: str):
+        if _DEBUG_WIFI:
+            try:
+                print(f"[WiFi][{_ts()}] {msg}")
+            except Exception:
+                pass
+
     @app.route('/api/wifi/status', methods=['GET'])
     def get_wifi_status():
         _dbg("API GET /api/wifi/status aufgerufen ...")
