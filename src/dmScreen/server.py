@@ -1024,12 +1024,11 @@ def register_wifi_routes(app, on_change=None):
     def api_disconnect():
         _dbg("API POST /api/wifi/disconnect ...")
         set_target_wifi(None)
-        _dbg(f"API /api/wifi/disconnect Ergebnis: success={success} | entfernte SSID={ssid}")
+        _dbg(f"API /api/wifi/disconnect")
         msg = (
             'Wifi disconnected, use AP "dmscreen" (password "dmscreen") and navigate to 192.168.4.1 to continue. You can close this tab.'
-            if success else 'Failed to disconnect WiFi'
         )
-        return jsonify({'success': success, 'ssid': ssid, 'message': msg})
+        return jsonify({'success': True, 'ssid': ssid, 'message': msg})
 
 
 
