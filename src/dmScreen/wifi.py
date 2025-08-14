@@ -568,7 +568,7 @@ def disconnect_and_forget_current():
 
 
 def wifi_monitor():
-    global target_wifi
+    global target_wifi, current_wifi
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
 
@@ -583,23 +583,10 @@ def wifi_monitor():
 
 
     while True:
-        try:
-            cur = current_ssid()
-            if cur:
-                _dbg(f"Monitor: Bereits verbunden mit SSID='{cur}'.")
-            else:
-                _dbg("Monitor: Nicht verbunden – versuche bekannte Netzwerke ...")
-                # Try connect to the best known network first
-                connected = connect_best_known_network()
-                if connected:
-                    _dbg(f"Monitor: Verbindung hergestellt. Aktuelle SSID={current_ssid()}")
-                else:
-                    if not check_adhoc_network(force=True):
-                        _dbg("Monitor: Starte Ad-hoc-Netzwerk ...")
-                        create_adhoc_network()
-        except Exception as e:
-            _dbg(f"wifi_monitor loop error: {type(e).__name__}: {e}")
-        time.sleep(60)  # Check every minute
+        if target_wifi is None and current_wifi is not None:
+            _forget_network_everywhere(current_wifi)
+
+        time.sleep(60)
 
 
 
