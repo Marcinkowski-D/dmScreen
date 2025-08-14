@@ -386,6 +386,7 @@ def disconnect_and_forget_current():
     try:
         with config_lock:
             _run_script('forget-wifi.sh')
+            ssid = current_wifi
             # Remove from known networks if present
             if current_wifi:
                 try:
@@ -409,10 +410,9 @@ def wifi_monitor():
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
     scanned_ssids = _scan_visible_ssids()
-    while scanned_ssids is None:
+    while scanned_ssids is None or len(scanned_ssids) == 0:
         scanned_ssids = _scan_visible_ssids()
     known_ssids = _load_known_networks()
-    time.sleep(1)
 
     for k_ssid in known_ssids:
         if k_ssid['ssid'] in scanned_ssids:
