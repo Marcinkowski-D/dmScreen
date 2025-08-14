@@ -341,6 +341,7 @@ def _scan_visible_ssids():
         _dbg(f"Gefundene SSIDs via iw: {sorted(list(ssids_local))}")
     else:
         _dbg("'iw dev wlan0 scan' lieferte keine verwertbaren Daten")
+        return None
     return sorted(list(ssids_local))
 
 
@@ -404,6 +405,8 @@ def wifi_monitor():
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
     scanned_ssids = _scan_visible_ssids()
+    while scanned_ssids is None:
+        scanned_ssids = _scan_visible_ssids()
     known_ssids = _load_known_networks()
     time.sleep(1)
 
