@@ -48,6 +48,7 @@ _WIFI_POLL_TRIES = int(os.getenv('DM_WIFI_POLL_TRIES', '10'))
 _WIFI_SCAN_PAUSE_AP = not (os.getenv('DM_WIFI_SCAN_PAUSE_AP', '0').lower() in ('0', 'false', 'no', 'off', ''))
 
 target_wifi = None
+current_wifi = None
 
 # -----------------------------
 # Helpers for known networks
