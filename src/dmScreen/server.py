@@ -1107,7 +1107,7 @@ def main():
         print(f'Network admin URL: http://{lan_ip}{port_part}/admin')
         print(f'Network view URL: http://{lan_ip}{port_part}/view')
         print('server listening...')
-        app.run(host='0.0.0.0', port=PORT, debug=True)
+        app.run(host='0.0.0.0', port=PORT, debug=False)
     finally:
         # Shutdown background caching system when server stops
         print('shutting down background caching system')
