@@ -61,6 +61,10 @@ current_wifi = None
 # Helpers for known networks
 # -----------------------------
 
+def set_target_wifi(ssid: str):
+    global target_wifi
+    target_wifi = ssid
+
 def set_change_callback(cb):
     global change_callback
     change_callback = cb
