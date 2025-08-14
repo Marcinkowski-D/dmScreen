@@ -377,7 +377,7 @@ def check_adhoc_network():
 
 def check_wifi_connection():
     global target_wifi, current_wifi
-    return target_wifi is not None and target_wifi == current_wifi
+    return (target_wifi is not None and target_wifi == current_wifi), current_wifi
 
 def disconnect_and_forget_current():
 

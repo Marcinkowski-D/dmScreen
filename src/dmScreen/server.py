@@ -71,13 +71,9 @@ NETWORK_STATUS_CACHE = {
 def recompute_network_status():
     """Recompute and cache network status: connected, ssid, adhoc_active, and admin_url."""
     try:
-        connected = check_wifi_connection()
+        connected, ssid = check_wifi_connection()
     except Exception:
         connected = False
-    try:
-        ssid = current_ssid() if connected else None
-    except Exception:
-        ssid = None
     adhoc_active = False
     if not connected:
         try:
@@ -978,7 +974,7 @@ def register_wifi_routes(app, on_change=None):
     @app.route('/api/wifi/status', methods=['GET'])
     def get_wifi_status():
         _dbg("API GET /api/wifi/status aufgerufen ...")
-        connected = check_wifi_connection()
+        connected, ssid = check_wifi_connection()
         adhoc_active = False
         adhoc_ssid = None
         if not connected:
@@ -1023,6 +1019,7 @@ def register_wifi_routes(app, on_change=None):
     @app.route('/api/wifi/disconnect', methods=['POST'])
     def api_disconnect():
         _dbg("API POST /api/wifi/disconnect ...")
+        connected, ssid = check_wifi_connection()
         set_target_wifi(None)
         _dbg(f"API /api/wifi/disconnect")
         msg = (
