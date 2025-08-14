@@ -97,7 +97,6 @@ def reset_admin_connection():
     global admin_connected, last_network_change
     admin_connected = False
     last_network_change = time.time()
-    print("Network configuration changed, reset admin connection status")
     try:
         update_timestamp()
     except Exception:
@@ -147,7 +146,6 @@ def allowed_file(filename):
 
 def update_timestamp():
     global last_update_timestamp
-    print('setting timestamp')
     last_update_timestamp = time.time()
     
 def cleanup_cache(max_age=86400, max_size=500*1024*1024):  # Default: 1 day, 500MB
@@ -162,7 +160,6 @@ def cleanup_cache(max_age=86400, max_size=500*1024*1024):  # Default: 1 day, 500
     last_cache_cleanup = current_time
     
     try:
-        print("Running cache cleanup...")
         if not os.path.exists(CACHE_FOLDER):
             return
             
@@ -190,13 +187,10 @@ def cleanup_cache(max_age=86400, max_size=500*1024*1024):  # Default: 1 day, 500
             if current_time - mtime > max_age or total_size > max_size:
                 os.remove(file_path)
                 total_size -= size
-                print(f"Removed cache file: {file_path}")
                 
             # Stop if we're under the size limit
             if total_size <= max_size * 0.8:  # 80% of max to provide buffer
                 break
-                
-        print("Cache cleanup completed")
     except Exception as e:
         print(f"Error during cache cleanup: {e}")
 
@@ -209,7 +203,7 @@ def index():
 def admin():
     global admin_connected
     # Set admin_connected to True when admin page is accessed
-    # admin_connected = True ## DEBUG
+    admin_connected = True
     update_timestamp()
     
     admin_path = os.path.join(WWW_FOLDER, 'admin.html')
@@ -494,7 +488,6 @@ def check_updates():
     except Exception:
         recompute_network_status()
         cache = NETWORK_STATUS_CACHE
-    print(f"Network status cache: {cache}")
     return jsonify({
         'timestamp': last_update_timestamp,
         'instance_id': SERVER_INSTANCE_ID,
@@ -668,7 +661,6 @@ def upload_image():
     
     # Function to process a single image in a separate thread
     def process_image(file_index, file):
-        print('processing file', file.filename)
         if not file or not allowed_file(file.filename):
             return None
             
@@ -695,8 +687,6 @@ def upload_image():
                     os.remove(filepath)  # Remove the original file
                     filepath = new_filepath
                     filename = os.path.basename(new_filepath)
-
-                print(f"Saved image {filename} as WebP")
         except Exception as e:
             print(f"Error processing image: {e}")
             return None
@@ -1007,13 +997,6 @@ def register_wifi_routes(app, on_change=None):
                 if success else 'Failed to configure WiFi'
             )
         })
-
-    @app.route('/api/wifi/known', methods=['GET'])
-    def api_list_known():
-        _dbg("API GET /api/wifi/known ...")
-        nets = list_known_networks()
-        _dbg(f"API /api/wifi/known -> {len(nets)} Netzwerke: {[n.get('ssid') for n in nets]}")
-        return jsonify({'networks': nets})
 
     @app.route('/api/wifi/disconnect', methods=['POST'])
     def api_disconnect():

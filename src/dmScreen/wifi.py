@@ -288,6 +288,7 @@ def _scan_visible_ssids():
 
 
 def configure_wifi(ssid, password):
+    global target_wifi
     """Add credentials to list and set target ssid"""
     try:
         _dbg(f"Konfiguriere WLAN via Skript: gewünschte SSID='{ssid}' ...")
@@ -346,14 +347,10 @@ def wifi_monitor():
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
     scanned_ssids = _scan_visible_ssids()
-    print('scanned_ssids', scanned_ssids)
     while scanned_ssids is None or len(scanned_ssids) == 0:
         time.sleep(1)
         scanned_ssids = _scan_visible_ssids()
-        print('scanned_ssids', scanned_ssids)
-    print('loading new networks')
     known_ssids = _load_known_networks()
-    print(f'known_ssids: {known_ssids}')
 
     for k_ssid in known_ssids:
         if k_ssid['ssid'] in scanned_ssids:
@@ -361,10 +358,7 @@ def wifi_monitor():
             break
 
     while True:
-        print(f'target-wifi: {target_wifi}, current-wifi: {current_wifi}')
         if target_wifi is None and current_wifi is not None:
-            print(f'target-wifi: {target_wifi}')
-            print(f'current-wifi: {current_wifi}')
             disconnect_and_forget_current()
             if change_callback:
                 try:
@@ -373,8 +367,6 @@ def wifi_monitor():
                     pass
 
         if target_wifi is not None and current_wifi != target_wifi:
-            print(f'target-wifi: {target_wifi}')
-            print(f'current-wifi: {current_wifi}')
             connect_network()
             if change_callback:
                 try:
