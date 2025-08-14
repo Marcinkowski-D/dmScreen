@@ -53,12 +53,49 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network, current_ssid
+from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wifi, create_adhoc_network, check_adhoc_network, check_wifi_connection, connect_best_known_network, current_ssid, stop_adhoc_network
 
 # Global variables
 admin_connected = False  # Track if admin has connected
 last_network_change = 0  # Track when network configuration last changed
 wifi_reconcile_event = threading.Event()  # Event-driven monitor trigger
+
+# Cached network status to avoid frequent system calls on polling endpoints
+NETWORK_STATUS_CACHE = {
+    'connected': False,
+    'ssid': None,
+    'adhoc_active': False,
+    'admin_url': None,
+}
+
+
+def recompute_network_status():
+    """Recompute and cache network status: connected, ssid, adhoc_active, and admin_url."""
+    try:
+        connected = check_wifi_connection()
+    except Exception:
+        connected = False
+    try:
+        ssid = current_ssid() if connected else None
+    except Exception:
+        ssid = None
+    adhoc_active = False
+    if not connected:
+        try:
+            adhoc_active = check_adhoc_network()
+        except Exception:
+            adhoc_active = False
+    # Choose IP depending on mode
+    ip_address = '192.168.4.1' if adhoc_active else get_lan_ip()
+    port = int(os.getenv('PORT', '80'))
+    port_part = '' if port == 80 else f':{port}'
+    admin_url = f"http://{ip_address}{port_part}/admin"
+    NETWORK_STATUS_CACHE.update({
+        'connected': connected,
+        'ssid': ssid,
+        'adhoc_active': adhoc_active,
+        'admin_url': admin_url,
+    })
 
 def reset_admin_connection():
     """Reset the admin_connected flag when network configuration changes"""
@@ -66,6 +103,15 @@ def reset_admin_connection():
     admin_connected = False
     last_network_change = time.time()
     print("Network configuration changed, reset admin connection status")
+    # Recompute network status cache and bump update timestamp so UI reflects changes
+    try:
+        recompute_network_status()
+    except Exception:
+        pass
+    try:
+        update_timestamp()
+    except Exception:
+        pass
     # Wake the WiFi monitor to reconcile immediately
     try:
         wifi_reconcile_event.set()
@@ -116,14 +162,64 @@ def wifi_monitor_wrapper():
             print(f"wifi_monitor_wrapper error: {e}")
 
 
-def start_wifi_monitor_wrapper():
-    """Start the event-driven WiFi monitoring thread and trigger initial reconciliation."""
-    # Trigger initial reconciliation at startup
+def bootstrap_network_on_start():
+    """One-time startup sequence:
+    1) stop-ap.sh, 2) start-ap.sh (ensure AP), 3) try to connect to known WiFi once.
+    If connection fails, keep AP running and wait for user network change.
+    """
     try:
-        wifi_reconcile_event.set()
-    except Exception:
-        pass
-    threading.Thread(target=wifi_monitor_wrapper, daemon=True).start()
+        print("[WiFi] Bootstrap: stop AP …")
+        try:
+            stop_adhoc_network()
+        except Exception as e:
+            print(f"[WiFi] Bootstrap: stop AP error: {e}")
+        print("[WiFi] Bootstrap: start AP …")
+        try:
+            create_adhoc_network()
+        except Exception as e:
+            print(f"[WiFi] Bootstrap: start AP error: {e}")
+        print("[WiFi] Bootstrap: try connect to best known network …")
+        connected = False
+        try:
+            connected = connect_best_known_network()
+        except Exception as e:
+            print(f"[WiFi] Bootstrap: connect attempt error: {e}")
+        if connected:
+            print("[WiFi] Bootstrap: connected to known WiFi.")
+            # Update cached status and timestamp once (do not trigger monitor event)
+            try:
+                recompute_network_status()
+            except Exception:
+                pass
+            try:
+                update_timestamp()
+            except Exception:
+                pass
+        else:
+            print("[WiFi] Bootstrap: no WiFi connected, keep AP active.")
+            # Ensure AP is active for admin access
+            try:
+                create_adhoc_network()
+            except Exception:
+                pass
+            # Update cached status and timestamp once
+            try:
+                recompute_network_status()
+            except Exception:
+                pass
+            try:
+                update_timestamp()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[WiFi] Bootstrap error: {e}")
+
+
+def start_wifi_monitor_wrapper():
+    """Start the event-driven WiFi monitoring thread without triggering an initial reconcile."""
+    # Start background thread; it will wait for wifi_reconcile_event set by GUI actions
+    t = threading.Thread(target=wifi_monitor_wrapper, daemon=True)
+    t.start()
 
 # Configuration
 BASE_DIR = os.getcwd()
@@ -492,37 +588,26 @@ def get_current_state():
 
 @app.route('/api/updates', methods=['GET'])
 def check_updates():
-    global last_update_timestamp, admin_connected, SERVER_INSTANCE_ID
-    # Determine network status first
+    global last_update_timestamp, admin_connected, SERVER_INSTANCE_ID, NETWORK_STATUS_CACHE
+    # Use cached network status to avoid frequent system calls during steady state
     try:
-        connected = check_wifi_connection()
+        cache = NETWORK_STATUS_CACHE if isinstance(NETWORK_STATUS_CACHE, dict) else {}
+        if 'admin_url' not in cache:
+            recompute_network_status()
+            cache = NETWORK_STATUS_CACHE
     except Exception:
-        connected = False
-    try:
-        ssid = current_ssid() if connected else None
-    except Exception:
-        ssid = None
-    adhoc_active = False
-    if not connected:
-        try:
-            adhoc_active = check_adhoc_network()
-        except Exception:
-            adhoc_active = False
-    # Choose IP depending on mode
-    ip_address = '192.168.4.1' if adhoc_active else get_lan_ip()
-    port = int(os.getenv('PORT', '80'))
-    port_part = '' if port == 80 else f':{port}'
-    admin_url = f"http://{ip_address}{port_part}/admin"
+        recompute_network_status()
+        cache = NETWORK_STATUS_CACHE
     return jsonify({
         'timestamp': last_update_timestamp,
         'instance_id': SERVER_INSTANCE_ID,
         'admin_connected': admin_connected,
-        'ip': admin_url,
-        'wifi_connected': connected,
-        'ssid': ssid,
-        'adhoc_active': adhoc_active,
-        'adhoc_ssid': 'dmscreen' if adhoc_active else None,
-        'adhoc_password': 'dmscreen' if adhoc_active else None
+        'ip': cache.get('admin_url'),
+        'wifi_connected': cache.get('connected'),
+        'ssid': cache.get('ssid'),
+        'adhoc_active': cache.get('adhoc_active'),
+        'adhoc_ssid': 'dmscreen' if cache.get('adhoc_active') else None,
+        'adhoc_password': 'dmscreen' if cache.get('adhoc_active') else None
     })
 
 @app.route('/api/images', methods=['GET'])
@@ -1002,7 +1087,10 @@ def main():
     if hasattr(os, 'uname'):
         if "Raspbian" in os.uname().version:
             print('is linux!')
-            start_wifi_monitor_wrapper()  # Use our wrapper function
+            # One-time bootstrap: stop AP -> start AP -> try WiFi connect
+            bootstrap_network_on_start()
+            # Start monitor thread that waits for GUI-triggered changes
+            start_wifi_monitor_wrapper()
         else:
             print('not Raspberry Pi!')
     else:

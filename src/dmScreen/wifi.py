@@ -249,6 +249,18 @@ def _start_ap_services():
     _run_script('start-ap.sh')
 
 
+def stop_adhoc_network():
+    """Public wrapper to stop the ad-hoc AP via stop-ap.sh and clear AP cache."""
+    try:
+        _stop_ap_services()
+        with _wifi_cache_lock:
+            globals()['_cached_adhoc'] = False
+            globals()['_cached_adhoc_ts'] = time.time()
+        return True
+    except Exception:
+        return False
+
+
 
 def create_adhoc_network():
     """Create an ad-hoc AP if no WiFi connected by invoking start-ap.sh.
