@@ -126,24 +126,8 @@ def run_cmd(args, check=False, shell=False):
     - Logs duration, rc, and trimmed outputs.
     """
     start = time.time()
-    # Prepare safe command string
-    try:
-        safe_args = list(args)
-        for i, val in enumerate(list(safe_args)):
-            if isinstance(val, str) and val.lower() in ('password', 'psk', 'passphrase'):
-                if i + 1 < len(safe_args):
-                    safe_args[i + 1] = '****'
-        cmd_str = ' '.join(str(a) for a in safe_args)
-    except Exception:
-        cmd_str = str(args)
-    _dbg(f"CMD ausführen: {cmd_str}")
     try:
         res = subprocess.run(args, capture_output=True, text=True, check=check, shell=shell)
-        duration = int((time.time() - start) * 1000)
-        out = (res.stdout or '').strip()
-        err = (res.stderr or '').strip()
-        interpretation = 'OK' if res.returncode == 0 else 'FEHLER'
-        # _dbg(f"CMD Ergebnis ({duration} ms): rc={res.returncode} | stdout='{out[:1000]}' | stderr='{err[:1000]}' | Interpretation: {interpretation}")
         return res
     except Exception as e:
         duration = int((time.time() - start) * 1000)
