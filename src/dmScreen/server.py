@@ -38,11 +38,9 @@ from dmScreen.cache_worker import (
 
 def get_lan_ip():
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*' | head -n 1")
+        print(p)
+        return '127.0.0.1' ## debug
     except:
         return "127.0.0.1"
 
@@ -52,7 +50,8 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import start_wifi_monitor, configure_wifi, add_known_network, current_ssid, disconnect_and_forget_current, set_target_wifi, set_change_callback, check_adhoc_network, check_wifi_connection
+from dmScreen.wifi import start_wifi_monitor, configure_wifi, add_known_network, current_ssid, disconnect_and_forget_current, set_target_wifi, set_change_callback, check_adhoc_network, check_wifi_connection, \
+    run_cmd
 
 # Global variables
 admin_connected = False  # Track if admin has connected
@@ -70,6 +69,7 @@ NETWORK_STATUS_CACHE = {
 
 def recompute_network_status():
     """Recompute and cache network status: connected, ssid, adhoc_active, and admin_url."""
+    ssid = None
     try:
         connected, ssid = check_wifi_connection()
     except Exception:
@@ -489,14 +489,12 @@ def check_updates():
     global last_update_timestamp, admin_connected, SERVER_INSTANCE_ID, NETWORK_STATUS_CACHE
     # Use cached network status to avoid frequent system calls during steady state
     try:
+        recompute_network_status()
         cache = NETWORK_STATUS_CACHE if isinstance(NETWORK_STATUS_CACHE, dict) else {}
-        if 'admin_url' not in cache:
-            recompute_network_status()
-            cache = NETWORK_STATUS_CACHE
-        print(f"Network status cache: {cache}")
     except Exception:
         recompute_network_status()
         cache = NETWORK_STATUS_CACHE
+    print(f"Network status cache: {cache}")
     return jsonify({
         'timestamp': last_update_timestamp,
         'instance_id': SERVER_INSTANCE_ID,

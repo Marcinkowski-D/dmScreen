@@ -120,7 +120,7 @@ def remove_known_network(ssid):
 # WiFi/OS utilities
 # -----------------------------
 
-def _run_cmd(args, check=False):
+def run_cmd(args, check=False):
     """Run a system command and return CompletedProcess. Adds detailed debug logging.
     - Redacts secrets from args (password/psk/passphrase)
     - Logs duration, rc, and trimmed outputs.
@@ -155,7 +155,7 @@ def _run_script(script_name: str, *script_args):
     """Helper to run one of the provided WiFi/AP scripts located at project root with sudo."""
     script_path = os.path.join(_PROJECT_ROOT, script_name)
     cmd = ['sudo', '/bin/bash', script_path, *[str(a) for a in script_args]]
-    return _run_cmd(cmd)
+    return run_cmd(cmd)
 
 
 
@@ -168,59 +168,11 @@ def _start_ap_services():
     _run_script('start-ap.sh')
 
 
-def _write_wpa_supplicant(networks):
-    """Write wpa_supplicant configs. On Debian/RPi, wpa_supplicant@wlan0 reads
-    /etc/wpa_supplicant/wpa_supplicant-wlan0.conf, so we write both that file
-    and the generic /etc/wpa_supplicant/wpa_supplicant.conf to keep them in sync.
-    """
-    try:
-        pr_list = []
-        for prio, net in enumerate(networks, start=1):
-            ssid = net.get('ssid', '')
-            pr_list.append(f"prio={prio} ssid='{ssid}'")
-        _dbg(f"Schreibe wpa_supplicant.conf mit {len(networks)} Netzwerken: {', '.join(pr_list)} (Passwörter werden nicht geloggt)")
-    except Exception:
-        _dbg(f"Schreibe wpa_supplicant.conf (Anzahl Netzwerke: {len(networks) if isinstance(networks, list) else 'unbekannt'})")
-    header = """ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=DE
-
-"""
-    blocks = []
-    # Assign higher priority to later entries so the most recently added network wins
-    for prio, net in enumerate(networks, start=1):
-        ssid = net.get('ssid', '')
-        psk = net.get('password', '')
-        blocks.append(
-            f"network={{\n    ssid=\"{ssid}\"\n    psk=\"{psk}\"\n    key_mgmt=WPA-PSK\n    priority={prio}\n}}\n"
-        )
-    content = header + ''.join(blocks)
-    # Ensure target directory exists
-    try:
-        if not os.path.exists('/etc/wpa_supplicant'):
-            _dbg("/etc/wpa_supplicant existiert nicht – lege an ...")
-            _run_cmd(['sudo', 'mkdir', '-p', '/etc/wpa_supplicant'], check=True)
-    except Exception as e:
-        _dbg(f"Warnung: konnte /etc/wpa_supplicant nicht prüfen/anlegen: {type(e).__name__}: {e}")
-    # Write temp file then move to generic path
-    with open('wpa_supplicant.conf.tmp', 'w', encoding='utf-8') as f:
-        f.write(content)
-    _run_cmd(['sudo', 'mv', 'wpa_supplicant.conf.tmp', '/etc/wpa_supplicant/wpa_supplicant.conf'], check=True)
-    # Also copy to the interface-specific config used by wpa_supplicant@wlan0
-    _dbg("Kopiere Konfiguration nach /etc/wpa_supplicant/wpa_supplicant-wlan0.conf ...")
-    _run_cmd(['sudo', 'cp', '/etc/wpa_supplicant/wpa_supplicant.conf', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'], check=True)
-    # Ensure secure ownership and permissions (required by wpa_supplicant)
-    _dbg("Setze Besitzer und Berechtigungen (root:root, 600) für wpa_supplicant Konfigurationsdateien ...")
-    _run_cmd(['sudo', 'chown', 'root:root', '/etc/wpa_supplicant/wpa_supplicant.conf'])
-    _run_cmd(['sudo', 'chmod', '600', '/etc/wpa_supplicant/wpa_supplicant.conf'])
-    _run_cmd(['sudo', 'chown', 'root:root', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
-    _run_cmd(['sudo', 'chmod', '600', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
-
 
 def _wpa_ping() -> bool:
     """Return True if wpa_cli can reach wpa_supplicant (expects 'PONG')."""
     _dbg("Prüfe Erreichbarkeit von wpa_supplicant (wpa_cli ping) ...")
-    res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'ping'])
+    res = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'ping'])
     ok = (res.returncode == 0) and ('PONG' in (res.stdout or ''))
     _dbg(f"wpa_cli ping -> {'OK' if ok else 'NICHT ERREICHBAR'}")
     return ok
@@ -233,24 +185,24 @@ def _ensure_wpa_running() -> bool:
         _dbg("wpa_supplicant bereits erreichbar.")
         return True
     _dbg("Versuche rfkill unblock und Interface hochzufahren ...")
-    _run_cmd(['sudo', 'rfkill', 'unblock', 'all'])
-    _run_cmd(['sudo', 'ifconfig', 'wlan0', 'up'])
+    run_cmd(['sudo', 'rfkill', 'unblock', 'all'])
+    run_cmd(['sudo', 'ifconfig', 'wlan0', 'up'])
 
     _dbg("Starte Dienst neu: wpa_supplicant@wlan0 ...")
-    _run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
+    run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
     time.sleep(1)
     if _wpa_ping():
         return True
 
     _dbg("Starte generischen Dienst neu: wpa_supplicant ...")
-    _run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant'])
+    run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant'])
     time.sleep(1)
     if _wpa_ping():
         return True
 
     _dbg("Starte wpa_supplicant manuell im Hintergrund ...")
     # Use the interface-specific config common on Debian/RPi
-    _run_cmd(['sudo', 'wpa_supplicant', '-B', '-i', 'wlan0', '-c', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
+    run_cmd(['sudo', 'wpa_supplicant', '-B', '-i', 'wlan0', '-c', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
     time.sleep(1)
     ok = _wpa_ping()
     _dbg(f"wpa_supplicant manuell gestartet -> {'OK' if ok else 'FEHLER'}")
@@ -264,13 +216,13 @@ def _reconfigure_wpa():
         _ensure_wpa_running()
     except Exception as e:
         _dbg(f"Fehler bei _ensure_wpa_running vor reconfigure: {type(e).__name__}: {e}")
-    res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+    res = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
     ok = (res.returncode == 0) and ('FAIL' not in (((res.stdout or '') + ' ' + (res.stderr or '')).upper()))
     if not ok:
         _dbg("wpa_cli reconfigure war nicht erfolgreich – starte wpa_supplicant@wlan0 neu und versuche erneut ...")
-        _run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
+        run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
         time.sleep(1)
-        res2 = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
+        res2 = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
         ok2 = (res2.returncode == 0) and ('FAIL' not in (((res2.stdout or '') + ' ' + (res2.stderr or '')).upper()))
         _dbg(f"wpa_cli reconfigure (Retry) -> {'ERFOLG' if ok2 else 'FEHLER'}")
 
@@ -283,7 +235,7 @@ def _os_forget_network_wpa(ssid: str):
     """Remove matching SSID networks from wpa_supplicant runtime and save config."""
     try:
         _dbg(f"Entferne SSID aus wpa_supplicant Runtime (wenn vorhanden): '{ssid}' ...")
-        res = _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
+        res = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
         if res.returncode != 0 or not res.stdout:
             _dbg("Keine Netzwerke von wpa_cli list_networks erhalten – Abbruch Forget.")
             return False
@@ -301,11 +253,11 @@ def _os_forget_network_wpa(ssid: str):
                 s = parts[1].strip()
                 if s == ssid:
                     _dbg(f"Entferne network_id={nid} für SSID '{s}' ...")
-                    _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'remove_network', nid])
+                    run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'remove_network', nid])
                     removed_ids.append(nid)
         if removed_ids:
             _dbg(f"Speichere wpa_supplicant Konfiguration nach Entfernen: ids={removed_ids} ...")
-            _run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'save_config'])
+            run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'save_config'])
             _reconfigure_wpa()
         _dbg(f"Forget Ergebnis: removed_any={bool(removed_ids)} ids={removed_ids}")
         return bool(removed_ids)
@@ -333,7 +285,7 @@ def _scan_visible_ssids():
     _dbg("Scanne sichtbare WLANs (iw scan) ...")
 
     ssids_local = set()
-    res_local = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
+    res_local = run_cmd(['iw', 'dev', 'wlan0', 'scan'])
     if res_local.returncode == 0 and res_local.stdout:
         _dbg("Nutze Ergebnisse von 'iw dev wlan0 scan' ...")
         for line in res_local.stdout.splitlines():
