@@ -215,16 +215,17 @@ async function fetchUpdates() {
         // If AP/Adhoc is active, populate the SSID datalist for combo input
         if (data.adhoc_active && Array.isArray(data.scanned_ssids) && wifiSSIDList) {
             // Clear existing options
-            while (wifiSSIDList.firstChild) wifiSSIDList.removeChild(wifiSSIDList.firstChild);
-            const seen = new Set();
-            data.scanned_ssids.forEach(ssid => {
-                const s = String(ssid || '').trim();
-                if (!s || seen.has(s)) return;
-                seen.add(s);
-                const opt = document.createElement('option');
-                opt.value = s;
-                wifiSSIDList.appendChild(opt);
-            });
+            if (wifiSSIDList.children.length === 0){
+                const seen = new Set();
+                data.scanned_ssids.forEach(ssid => {
+                    const s = String(ssid || '').trim();
+                    if (!s || seen.has(s)) return;
+                    seen.add(s);
+                    const opt = document.createElement('option');
+                    opt.value = s;
+                    wifiSSIDList.appendChild(opt);
+                });
+            }
         }
 
         // If there's a new update, fetch the current state
