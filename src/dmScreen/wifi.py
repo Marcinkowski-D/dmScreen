@@ -410,8 +410,11 @@ def wifi_monitor():
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
     scanned_ssids = _scan_visible_ssids()
+    print('scanned_ssids', scanned_ssids)
     while scanned_ssids is None or len(scanned_ssids) == 0:
+        print('scanned_ssids', scanned_ssids)
         scanned_ssids = _scan_visible_ssids()
+    print('loading new networks')
     known_ssids = _load_known_networks()
     print(f'known_ssids: {known_ssids}')
 
