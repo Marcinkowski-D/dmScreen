@@ -386,14 +386,14 @@ def disconnect_and_forget_current():
     try:
         with config_lock:
             _run_script('forget-wifi.sh')
-            current_wifi = None
             # Remove from known networks if present
-            if ssid:
+            if current_wifi:
                 try:
                     removed_known = remove_known_network(current_wifi)
-                    _dbg(f"Entferne aus Known-Liste: ssid='{ssid}' -> removed={removed_known}")
+                    _dbg(f"Entferne aus Known-Liste: ssid='{current_wifi}' -> removed={removed_known}")
                 except Exception as e:
                     _dbg(f"Fehler beim Entfernen aus Known-Liste: {type(e).__name__}: {e}")
+            current_wifi = None
             # Start AP so user can reconnect/configure
             _start_ap_services()
             time.sleep(2)
