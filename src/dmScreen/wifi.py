@@ -452,9 +452,6 @@ def wifi_monitor():
     global target_wifi, current_wifi, change_callback
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
-
-    _stop_ap_services()
-    _start_ap_services()
     ssids = _scan_visible_ssids()
     known_ssids = _load_known_networks()
     time.sleep(1)
