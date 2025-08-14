@@ -361,6 +361,7 @@ def wifi_monitor():
             break
 
     while True:
+        print(f'target-wifi: {target_wifi}, current-wifi: {current_wifi}')
         if target_wifi is None and current_wifi is not None:
             print(f'target-wifi: {target_wifi}')
             print(f'current-wifi: {current_wifi}')
