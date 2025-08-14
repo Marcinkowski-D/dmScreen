@@ -138,7 +138,7 @@ def run_cmd(args, check=False):
         cmd_str = str(args)
     _dbg(f"CMD ausführen: {cmd_str}")
     try:
-        res = subprocess.run(args, capture_output=True, text=True, check=check)
+        res = subprocess.run(args, capture_output=True, text=True, check=check, shell=True)
         duration = int((time.time() - start) * 1000)
         out = (res.stdout or '').strip()
         err = (res.stderr or '').strip()
