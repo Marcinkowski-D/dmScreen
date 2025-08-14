@@ -136,7 +136,7 @@ def create_adhoc_network_wrapper():
 # Event-driven WiFi monitor: reconcile only on boot or explicit changes
 def wifi_monitor_wrapper():
     """Background thread that reconciles WiFi state when wifi_reconcile_event is set.
-    Order: Ensure AP first (for immediate admin access), then try to connect to known WiFi.
+    Order: Prefer staying on WiFi if connected; only start AP when not connected and connection attempts fail.
     """
     while True:
         try:
@@ -145,19 +145,24 @@ def wifi_monitor_wrapper():
             # Clear the event so subsequent changes can trigger again
             wifi_reconcile_event.clear()
 
-            # Ensure AP is active first so the admin UI is reachable immediately
-            if not check_adhoc_network():
-                create_adhoc_network_wrapper()
-
-            # If already connected to WiFi, nothing else to do
+            # If already connected to WiFi, do not start AP; optionally ensure AP services are stopped
             if check_wifi_connection():
+                try:
+                    if check_adhoc_network():
+                        stop_adhoc_network()
+                        reset_admin_connection()
+                except Exception:
+                    pass
                 continue
 
-            # Try connecting to best known networks; this will stop AP internally during attempts
+            # Not connected: first try connecting to best known networks (this stops AP internally)
             if connect_best_known_network():
                 reset_admin_connection()
                 continue
-            # If connection failed, keep AP running (already ensured above)
+
+            # If connection failed, ensure AP is active for admin access
+            if not check_adhoc_network():
+                create_adhoc_network_wrapper()
         except Exception as e:
             print(f"wifi_monitor_wrapper error: {e}")
 
