@@ -463,7 +463,8 @@ def _scan_visible_ssids():
     _dbg("Scanne sichtbare WLANs (iw scan) ...")
 
     ssids_local = set()
-    res_local = _run_cmd(['iw', 'dev', 'wlan0', 'scan', '|', 'grep', 'SSID:'])
+    res_local = _run_cmd(['iw', 'dev', 'wlan0', 'scan'])
+    print(res_local.stdout)
     if res_local.returncode == 0 and res_local.stdout:
         _dbg("Nutze Ergebnisse von 'iw dev wlan0 scan' ...")
         for line in res_local.stdout.splitlines():
