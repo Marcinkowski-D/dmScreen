@@ -58,6 +58,7 @@ from dmScreen.wifi import register_wifi_routes, start_wifi_monitor, configure_wi
 # Global variables
 admin_connected = False  # Track if admin has connected
 last_network_change = 0  # Track when network configuration last changed
+wifi_reconcile_event = threading.Event()  # Event-driven monitor trigger
 
 def reset_admin_connection():
     """Reset the admin_connected flag when network configuration changes"""
@@ -65,6 +66,11 @@ def reset_admin_connection():
     admin_connected = False
     last_network_change = time.time()
     print("Network configuration changed, reset admin connection status")
+    # Wake the WiFi monitor to reconcile immediately
+    try:
+        wifi_reconcile_event.set()
+    except Exception:
+        pass
 
 # Wrapper functions for WiFi operations that reset admin connection status
 def configure_wifi_wrapper(ssid, password):
@@ -81,25 +87,40 @@ def create_adhoc_network_wrapper():
         reset_admin_connection()
     return result
 
-# Modified wifi_monitor function to avoid creating multiple ad-hoc networks
+# Event-driven WiFi monitor: reconcile only on boot or explicit changes
 def wifi_monitor_wrapper():
-    """Background thread to monitor WiFi and prefer known networks; fallback to ad-hoc"""
+    """Background thread that reconciles WiFi state when wifi_reconcile_event is set."""
     while True:
         try:
-            if not check_wifi_connection():
-                # Try connect to best known network first
-                if connect_best_known_network():
-                    reset_admin_connection()
-                else:
-                    # Only create ad-hoc network if it's not already active
-                    if not check_adhoc_network():
-                        create_adhoc_network_wrapper()
+            # Wait until someone signals a network change or initial boot
+            wifi_reconcile_event.wait()
+            # Clear the event so subsequent changes can trigger again
+            wifi_reconcile_event.clear()
+
+            # One reconciliation pass
+            if check_wifi_connection():
+                # Already connected to WiFi; nothing to do
+                continue
+
+            # Try connecting to best known networks
+            if connect_best_known_network():
+                reset_admin_connection()
+                continue
+
+            # Ensure AP is active if not connected and no known networks succeeded
+            if not check_adhoc_network():
+                create_adhoc_network_wrapper()
         except Exception as e:
             print(f"wifi_monitor_wrapper error: {e}")
-        time.sleep(60)  # Check every minute
+
 
 def start_wifi_monitor_wrapper():
-    """Start the WiFi monitoring thread with our wrapper function"""
+    """Start the event-driven WiFi monitoring thread and trigger initial reconciliation."""
+    # Trigger initial reconciliation at startup
+    try:
+        wifi_reconcile_event.set()
+    except Exception:
+        pass
     threading.Thread(target=wifi_monitor_wrapper, daemon=True).start()
 
 # Configuration
