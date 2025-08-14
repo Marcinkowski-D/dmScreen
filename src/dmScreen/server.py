@@ -52,7 +52,7 @@ check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
 
 from dmScreen.database import Database
 # Import refactored modules
-from dmScreen.wifi import start_wifi_monitor, configure_wifi, current_ssid, disconnect_and_forget_current
+from dmScreen.wifi import start_wifi_monitor, configure_wifi, add_known_network, current_ssid, disconnect_and_forget_current
 
 # Global variables
 admin_connected = False  # Track if admin has connected
