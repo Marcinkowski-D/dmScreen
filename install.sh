@@ -8,6 +8,9 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Ermittle den absoluten Pfad des Projektverzeichnisses (robuster als $(pwd))
+APP_DIR="$(cd -- "$(dirname "$0")" && pwd -P)"
+
 echo "[*] Paketquellen aktualisieren ..."
 apt-get update -y
 
@@ -28,7 +31,7 @@ apt-get install -y \
   git \
   chromium-browser
   
-git config --global --add safe.directory $(pwd)
+git config --global --add safe.directory "$APP_DIR"
 
 # Dienste vorbereiten
 echo "[*] Dienste vorbereiten ..."
@@ -66,7 +69,7 @@ After=network.target
 
 [Service]
 User=root
-WorkingDirectory=$(pwd)
+WorkingDirectory=$APP_DIR
 ExecStart=/usr/bin/bash dmScreen-start.sh
 Restart=always
 RestartSec=5
