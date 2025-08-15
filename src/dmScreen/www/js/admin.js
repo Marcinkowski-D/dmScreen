@@ -22,6 +22,9 @@ const backdropText = document.getElementById('backdrop-text');
 const newFolderBtn = document.getElementById('new-folder-btn');
 const folderSelect = document.getElementById('folder-select');
 
+// Persistent list of files selected for upload (can be appended via multiple dialog opens)
+let selectedFiles = [];
+
 // Crop Modal Elements
 const cropModal = document.getElementById('crop-modal');
 const cropPreviewContainer = document.getElementById('crop-preview-container');
@@ -831,6 +834,11 @@ function removeImagePreview(index) {
         row.remove();
     }
 
+    // Mark the file slot as removed
+    if (typeof selectedFiles[index] !== 'undefined') {
+        selectedFiles[index] = null;
+    }
+
     // If no images left, hide preview container and disable upload button
     if (imagePreviewList.children.length === 0) {
         imagePreviewContainer.style.display = 'none';
@@ -953,7 +961,17 @@ uploadForm.addEventListener('submit', async (e) => {
     uploadButton.innerHTML = '<span class="spinner"></span> Konvertiere und lade hoch...';
 
     try {
-        const files = Array.from(imageFilesInput.files);
+        // Build entry list from current rows to preserve mapping and names
+        const entries = [];
+        rows.forEach((row) => {
+            const rowIndex = parseInt(row.dataset.index);
+            const file = selectedFiles[rowIndex];
+            if (file) {
+                entries.push({ row, index: rowIndex, file });
+            }
+        });
+
+        const files = entries.map(e => e.file);
 
         // Konvertiere Bilder zu WebP (falls unterstützt)
         let convertedFiles = files;
@@ -972,14 +990,11 @@ uploadForm.addEventListener('submit', async (e) => {
             formData.append('folder', folderSelect.value);
         }
 
-        // Add each converted file and its name to the form data
-        rows.forEach((row, index) => {
-            const rowIndex = parseInt(row.dataset.index);
-            const file = convertedFiles[rowIndex];
-            const nameInput = row.querySelector('.image-name-input');
-            // Use the input value or extract filename without extension as fallback
-            const name = nameInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
-
+        // Add each converted file and its name to the form data, keeping order of entries
+        entries.forEach((entry, i) => {
+            const file = convertedFiles[i];
+            const nameInput = entry.row.querySelector('.image-name-input');
+            const name = (nameInput.value || '').trim() || file.name.replace(/\.[^\/.]+$/, "");
             formData.append('files[]', file);
             formData.append('names[]', name);
         });
@@ -995,10 +1010,11 @@ uploadForm.addEventListener('submit', async (e) => {
 
         // Reset form and preview
         uploadForm.reset();
+        selectedFiles = [];
         imagePreviewContainer.style.display = 'none';
         imagePreviewList.innerHTML = '';
         uploadButton.disabled = true;
-        uploadButton.innerHTML = 'Ausgewählte Bilder hochladen';
+        uploadButton.innerHTML = 'Upload Selected Images';
 
         hideBackdrop();
 
@@ -1008,8 +1024,9 @@ uploadForm.addEventListener('submit', async (e) => {
         fetchCurrentState();
 
     } catch (error) {
-        uploadButton.disabled = false;
-        uploadButton.innerHTML = 'Ausgewählte Bilder hochladen';
+        // Keep disabled since the selection was cleared before upload
+        uploadButton.disabled = true;
+        uploadButton.innerHTML = 'Upload Selected Images';
         hideBackdrop();
         showAlert(`Fehler: ${error.message}`, 'Fehler');
     }
@@ -1038,35 +1055,37 @@ function formatBytes(bytes) {
 
 // Erweiterte handleFileSelection-Funktion mit WebP-Vorschau
 function handleFileSelection(e) {
-    const files = e.target.files;
+    const files = Array.from(e.target.files || []);
 
-    if (files.length === 0) {
+    if (files.length === 0 && imagePreviewList.children.length === 0) {
         imagePreviewContainer.style.display = 'none';
         uploadButton.disabled = true;
         return;
     }
 
-    // Clear previous previews
-    imagePreviewList.innerHTML = '';
-
-    // Show preview container
+    // Ensure preview container is visible if any files are/will be present
     imagePreviewContainer.style.display = 'block';
-    uploadButton.disabled = false;
 
-    // Add each file to the preview
-    Array.from(files).forEach((file, index) => {
-        // Create a preview row
+    // Append new files to persistent list (deduplicate by name+size+lastModified)
+    const existingKeys = new Set(
+        selectedFiles
+            .filter(f => !!f)
+            .map(f => `${f.name}::${f.size}::${f.lastModified}`)
+    );
+
+    files.forEach((file) => {
+        const key = `${file.name}::${file.size}::${file.lastModified}`;
+        if (existingKeys.has(key)) {
+            return; // skip duplicates
+        }
+        const index = selectedFiles.push(file) - 1; // new index
+
+        // Create a preview row for just this file
         const row = document.createElement('tr');
         row.dataset.index = index;
 
-        // Get file name without extension for default name
         const fileName = file.name.replace(/\.[^/.]+$/, "");
-
-        // Create a URL for the image preview
         const imageUrl = URL.createObjectURL(file);
-
-        // Bestimme ob das Bild zu WebP konvertiert wird
-        const willConvert = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp'].includes(file.type);
 
         row.innerHTML = `
             <td><img src="${imageUrl}" alt="${file.name}" class="preview-image"></td>
@@ -1080,10 +1099,14 @@ function handleFileSelection(e) {
         `;
 
         imagePreviewList.appendChild(row);
-
-        // Add event listener for remove button
         row.querySelector('.remove-image-btn').addEventListener('click', () => removeImagePreview(index));
     });
+
+    // Enable upload if we have any rows
+    uploadButton.disabled = imagePreviewList.children.length === 0;
+
+    // Reset the file input to allow selecting the same files again in the next dialog
+    imageFilesInput.value = '';
 }
 
 // Form submissions
@@ -1843,6 +1866,8 @@ async function openCropModal(imageId) {
 
             // Set rotation based on stored value
             currentRotation = currentImageData.rotate || 0;
+            // Ensure rotation button highlight reflects stored rotation
+            applyPreviewTransformations();
 
         }, 10);
 
