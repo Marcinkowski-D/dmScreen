@@ -1879,18 +1879,12 @@ async function openCropModal(imageId) {
 
 // Apply transformations to the preview image
 function applyPreviewTransformations() {
-    // Clear the canvas
-    cropPreviewCtx.clearRect(0, 0, cropPreviewCanvas.width, cropPreviewCanvas.height);
-
-    // If no image is loaded yet, return
-    if (!currentImageElement) return;
-
-    // Apply rotation button highlighting
+    // Apply rotation button highlighting regardless of image load
     rotate_0.classList.remove('active');
     rotate_90.classList.remove('active');
     rotate_180.classList.remove('active');
     rotate_270.classList.remove('active');
-    let flip_wh = false
+    let flip_wh = false;
     if (currentRotation === 90) {
         rotate_90.classList.add('active');
         flip_wh = true;
@@ -1902,6 +1896,12 @@ function applyPreviewTransformations() {
     } else {
         rotate_0.classList.add('active');
     }
+
+    // Clear the canvas
+    cropPreviewCtx.clearRect(0, 0, cropPreviewCanvas.width, cropPreviewCanvas.height);
+
+    // If no image is loaded yet, just return after updating buttons
+    if (!currentImageElement) return;
 
     // Save the canvas state
     cropPreviewCtx.save();

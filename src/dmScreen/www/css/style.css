@@ -66,6 +66,14 @@ textarea {
     background: #555;
 }
 
+/* Active button style (used for selected state across the app) */
+.btn.active {
+    background: linear-gradient(135deg, #2e7d32 0%, #43a047 50%, #66bb6a 100%);
+}
+.btn.active:hover {
+    background: linear-gradient(135deg, #2e7d32 0%, #43a047 50%, #66bb6a 100%); /* keep green gradient on hover */
+}
+
 /* Disabled button styles */
 .btn:disabled,
 button.btn[disabled],
@@ -661,10 +669,10 @@ button.active{
 
 /* Selected state for rotation buttons (radio-like) */
 .rotation-controls .btn.active {
-    background-color: #4CAF50; /* match active gallery border */
+    background: linear-gradient(135deg, #2e7d32 0%, #43a047 50%, #66bb6a 100%); /* match active gallery border tone */
 }
 .rotation-controls .btn.active:hover {
-    background-color: #4CAF50; /* keep green on hover */
+    background: linear-gradient(135deg, #2e7d32 0%, #43a047 50%, #66bb6a 100%); /* keep green gradient on hover */
 }
 
 /* Styles for images with transformations */
