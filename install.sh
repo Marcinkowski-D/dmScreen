@@ -27,6 +27,8 @@ apt-get install -y \
   curl \
   git \
   chromium-browser
+  
+git config --global --add safe.directory $(pwd)
 
 # Dienste vorbereiten
 echo "[*] Dienste vorbereiten ..."
