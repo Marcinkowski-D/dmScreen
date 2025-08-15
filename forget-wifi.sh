@@ -21,6 +21,7 @@ wpa_cli -i "$IFACE" disconnect >/dev/null 2>&1 || true
 dhclient -r "$IFACE" >/dev/null 2>&1 || true
 pkill -f "dhclient.*$IFACE" >/dev/null 2>&1 || true
 ip addr flush dev "$IFACE" 2>/dev/null || true
+nmcli connection delete "$SSID"
 
 # Konfig anpassen
 [ -f "$WPA_IF_FILE" ] || { echo "[!] $WPA_IF_FILE nicht gefunden."; exit 1; }
