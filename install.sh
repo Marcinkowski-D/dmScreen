@@ -76,6 +76,7 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 EOF
 
+systemctl daemon-reload
 systemctl enable dmscreen.service
 
 echo "[*] Creating autostart entry for kiosk mode..."
@@ -87,6 +88,8 @@ Name=KioskBrowser
 Exec=chromium-browser --disable-features=LowMemoryMonitor --noerrdialogs --kiosk http://127.0.0.1/view
 X-GNOME-Autostart-enabled=true
 EOF
+
+systemctl start dmscreen.service
 
 cat <<MSG
 
