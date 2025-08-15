@@ -26,7 +26,7 @@ apt-get install -y \
   wpasupplicant \
   curl \
   git \
-  chromium
+  chromium-browser
 
 # Dienste vorbereiten
 echo "[*] Dienste vorbereiten ..."
