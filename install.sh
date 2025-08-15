@@ -25,7 +25,8 @@ apt-get install -y \
   net-tools \
   wpasupplicant \
   curl \
-  git
+  git \
+  chromium
 
 # Dienste vorbereiten
 echo "[*] Dienste vorbereiten ..."
@@ -45,27 +46,48 @@ if [ -f /etc/dhcpcd.conf ]; then
   fi
 fi
 
-# Skripte ausführbar machen
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-chmod +x "$SCRIPT_DIR/start-ap.sh" || true
-chmod +x "$SCRIPT_DIR/stop-ap.sh" || true
-chmod +x "$SCRIPT_DIR/connect-wifi.sh" || true
-chmod +x "$SCRIPT_DIR/forget-wifi.sh" || true
-chmod +x "$SCRIPT_DIR/wifi-check.sh" || true
-[ -f "$SCRIPT_DIR/dmScreen-start.sh" ] && chmod +x "$SCRIPT_DIR/dmScreen-start.sh" || true
-
 # Region auf DE setzen (kann für 2,4GHz APs wichtig sein)
 iw reg set DE 2>/dev/null || true
+
+# Install uv if not already present
+if ! command -v uv &> /dev/null; then
+    echo "[*] Installing uv package installer..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+
+echo "[*] Creating systemd service..."
+mkdir -p /etc/systemd/system
+cat > /etc/systemd/system/dmscreen.service << 'EOF'
+[Unit]
+Description=DM Screen Webserver
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=$(pwd)
+ExecStart=/usr/bin/bash dmScreen-start.sh
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable dmscreen.service
+
+echo "[*] Creating autostart entry for kiosk mode..."
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/kiosk.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=KioskBrowser
+Exec=chromium-browser --disable-features=LowMemoryMonitor --noerrdialogs --kiosk http://127.0.0.1/view
+X-GNOME-Autostart-enabled=true
+EOF
 
 cat <<MSG
 
 [✓] Installation abgeschlossen.
-
-Nächste Schritte / Hinweise:
-- Starte den Dienst/Server deiner Anwendung. Beim Boot/Start wird der AP zuerst aktiviert,
-  danach wird – falls bekannte WLANs vorhanden und sichtbar sind – die Verbindung versucht.
-- AP-Start manuell: sudo "$SCRIPT_DIR/start-ap.sh"
-- AP-Stop:          sudo "$SCRIPT_DIR/stop-ap.sh"
-- WLAN verbinden:   sudo "$SCRIPT_DIR/connect-wifi.sh" "SSID" "PASSWORT"
 
 MSG
