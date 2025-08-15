@@ -62,7 +62,7 @@ fi
 
 echo "[*] Creating systemd service..."
 mkdir -p /etc/systemd/system
-cat > /etc/systemd/system/dmscreen.service << 'EOF'
+cat > /etc/systemd/system/dmscreen.service << EOF
 [Unit]
 Description=DM Screen Webserver
 After=network.target
@@ -70,7 +70,7 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=$APP_DIR
-ExecStart=/usr/bin/bash dmScreen-start.sh
+ExecStart=/usr/bin/bash "$APP_DIR/dmScreen-start.sh"
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
@@ -84,7 +84,7 @@ systemctl enable dmscreen.service
 
 echo "[*] Creating autostart entry for kiosk mode..."
 mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/kiosk.desktop << 'EOF'
+cat > ~/.config/autostart/kiosk.desktop << EOF
 [Desktop Entry]
 Type=Application
 Name=KioskBrowser
