@@ -22,6 +22,9 @@ dhclient -r "$IFACE" >/dev/null 2>&1 || true
 pkill -f "dhclient.*$IFACE" >/dev/null 2>&1 || true
 ip addr flush dev "$IFACE" 2>/dev/null || true
 nmcli connection delete "$SSID"
+nmcli connection delete $SSID
+sudo rm /etc/NetworkManager/system-connections/$SSID
+sudo rm /etc/NetworkManager/system-connections/preconfigured.nmconnection
 
 # Konfig anpassen
 [ -f "$WPA_IF_FILE" ] || { echo "[!] $WPA_IF_FILE nicht gefunden."; exit 1; }
