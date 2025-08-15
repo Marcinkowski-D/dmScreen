@@ -1706,10 +1706,6 @@ async function updatePreview(settings) {
         }
     } else if (settings.screensaver) {
         try {
-            // Find the screensaver name from the select element
-            const screensaverOption = Array.from(screensaverSelect.options).find(opt => opt.value === settings.screensaver);
-            const screensaverName = screensaverOption ? screensaverOption.textContent : 'Unknown';
-            
             // Fetch the image URL from the server with cache-busting timestamp
             const response = await fetch(`/api/image/${settings.screensaver}/url?w=${w}&t=${Date.now()}`);
             if (!response.ok) {
@@ -1718,6 +1714,7 @@ async function updatePreview(settings) {
             
             const data = await response.json();
             const imgUrl = data.url;
+            const imageName = data.name;
 
             // Load the image and draw it on the canvas
             const img = new Image();
@@ -1726,7 +1723,7 @@ async function updatePreview(settings) {
             };
             img.src = imgUrl;
 
-            previewStatus.textContent = `Showing screensaver: ${screensaverName}`;
+            previewStatus.textContent = `Showing screensaver: ${imageName}`;
         } catch (error) {
             console.error('Error fetching screensaver image URL:', error);
             previewStatus.textContent = 'Error loading screensaver preview';
