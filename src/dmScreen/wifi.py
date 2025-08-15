@@ -259,6 +259,30 @@ def _os_forget_network_wpa(ssid: str):
         return False
 
 
+def _os_forget_network_nmcli(ssid: str):
+    """Try to delete NetworkManager connection for the SSID and remove leftover files.
+    Mirrors relevant steps from forget-wifi.sh without disconnecting current interface.
+    """
+    try:
+        if not ssid:
+            return False
+        removed_any = False
+        _dbg(f"Entferne SSID aus NetworkManager (nmcli): '{ssid}' ...")
+        # Try nmcli delete by name (ignore errors)
+        res1 = run_cmd(['sudo', 'nmcli', 'connection', 'delete', ssid])
+        removed_any = removed_any or (res1.returncode == 0)
+        # Some systems require quotes/shell; attempt again via shell to be safe
+        res1b = run_cmd(f"sudo nmcli connection delete \"{ssid}\"", shell=True)
+        removed_any = removed_any or (res1b.returncode == 0)
+        # Remove potential system-connections files; ignore errors
+        run_cmd(f"sudo rm -f /etc/NetworkManager/system-connections/{ssid}", shell=True)
+        run_cmd("sudo rm -f /etc/NetworkManager/system-connections/preconfigured.nmconnection", shell=True)
+        return removed_any
+    except Exception as e:
+        _dbg(f"_os_forget_network_nmcli Fehler: {type(e).__name__}: {e}")
+        return False
+
+
 
 
 def _forget_network_everywhere(ssid: str):
@@ -266,11 +290,22 @@ def _forget_network_everywhere(ssid: str):
     removed = False
     try:
         if ssid:
+            # Try both NetworkManager and wpa_supplicant removal paths
+            removed = _os_forget_network_nmcli(ssid) or removed
             removed = _os_forget_network_wpa(ssid) or removed
     except Exception as e:
         _dbg(f"_forget_network_everywhere Ausnahme: {type(e).__name__}: {e}")
     _dbg(f"Vergessen abgeschlossen: removed={removed}")
     return removed
+
+
+def forget_and_remove_known(ssid: str):
+    """Forget a network at OS level and remove its credentials from known list.
+    Returns a tuple (os_removed: bool, known_removed: bool).
+    """
+    os_removed = _forget_network_everywhere(ssid)
+    known_removed = remove_known_network(ssid)
+    return os_removed, known_removed
 
 
 def _scan_visible_ssids():

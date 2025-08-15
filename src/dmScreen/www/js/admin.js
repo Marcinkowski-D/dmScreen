@@ -10,6 +10,8 @@ const wifiPasswordInput = document.getElementById('wifi-password');
 const wifiScanBtn = document.getElementById('wifi-scan-btn');
 const wifiSSIDList = document.getElementById('wifi-ssid-list');
 const wifiDisconnectBtn = document.getElementById('wifi-disconnect-btn');
+const knownWifiList = document.getElementById('known-wifi-list');
+const knownWifiRefreshBtn = document.getElementById('wifi-known-refresh');
 const previewCanvas = document.getElementById('preview-canvas');
 const previewStatus = document.getElementById('preview-status');
 const resetDisplayBtn = document.getElementById('reset-display');
@@ -187,6 +189,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Check WiFi status
     checkWifiStatus();
+
+    // Load known WiFi networks list
+    try { fetchKnownWifi(); } catch (_) {}
+    if (knownWifiRefreshBtn) {
+        knownWifiRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); try { fetchKnownWifi(); } catch (_) {} });
+    }
 
     // Add event listener for reset button
     resetDisplayBtn.addEventListener('click', resetDisplay);
@@ -1305,13 +1313,73 @@ wifiForm.addEventListener('submit', async (e) => {
             showAlert(data.message || "Connected. The new IP address is shown on the device's screen. You can close this tab.");
             setTimeout(checkWifiStatus, 5000); // Check status after 5 seconds
         } else {
-            showAlert(data.message ? `Failed to configure WiFi: ${data.message}` : 'Failed to configure WiFi');
+            showAlert(data.message ? `Failed to configure WiFi: ${data.message}` : 'Failed to configure WiFi. If you entered the wrong password, remove the saved credentials below and try again.');
+            try { if (typeof fetchKnownWifi === 'function') fetchKnownWifi(); } catch (_) {}
         }
 
     } catch (error) {
         showAlert(`Error: ${error.message}`);
     }
 });
+
+// Known WiFi list helpers
+async function fetchKnownWifi() {
+    try {
+        if (!knownWifiList) return;
+        const res = await fetch('/api/wifi/known');
+        const data = await res.json();
+        const networks = (data && Array.isArray(data.networks)) ? data.networks : [];
+        renderKnownWifi(networks);
+    } catch (e) {
+        if (knownWifiList) knownWifiList.innerHTML = '<li>Failed to load known networks</li>';
+    }
+}
+
+function renderKnownWifi(networks) {
+    if (!knownWifiList) return;
+    knownWifiList.innerHTML = '';
+    if (!networks || networks.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'No saved networks';
+        knownWifiList.appendChild(li);
+        return;
+    }
+    networks.forEach(n => {
+        const ssid = (n && n.ssid) ? String(n.ssid) : '';
+        const li = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent = ssid;
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.style.marginLeft = '8px';
+        btn.textContent = 'Remove';
+        btn.addEventListener('click', () => deleteKnownWifi(ssid));
+        li.appendChild(name);
+        li.appendChild(btn);
+        knownWifiList.appendChild(li);
+    });
+}
+
+async function deleteKnownWifi(ssid) {
+    if (!ssid) return;
+    const ok = await showConfirm(`Forget and remove saved credentials for "${ssid}"?`, 'Confirmation');
+    if (!ok) return;
+    try { showBackdrop('Removing saved WiFi...'); } catch (_) {}
+    try {
+        const res = await fetch(`/api/wifi/known/${encodeURIComponent(ssid)}`, { method: 'DELETE' });
+        const data = await res.json();
+        try { hideBackdrop(); } catch (_) {}
+        if (res.ok && data && data.success) {
+            showAlert(`Removed saved network "${ssid}"${data.os_removed ? ' and forgot it on the device' : ''}.`);
+        } else {
+            showAlert(`Failed to remove saved network "${ssid}".`);
+        }
+        try { fetchKnownWifi(); } catch (_) {}
+    } catch (e) {
+        try { hideBackdrop(); } catch (_) {}
+        showAlert('Error removing saved network');
+    }
+}
 
 // Helper functions
 async function checkWifiStatus() {

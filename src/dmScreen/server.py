@@ -57,6 +57,8 @@ from dmScreen.wifi import (
     run_cmd,
     get_scanned_ssids,
     get_lan_ip,
+    list_known_networks,
+    forget_and_remove_known,
 )
 
 # Global variables
@@ -116,14 +118,6 @@ def configure_wifi_wrapper(ssid, password):
     if result:
         reset_admin_connection()
     return result
-
-def create_adhoc_network_wrapper():
-    """Create ad-hoc network and reset admin connection status"""
-    result = create_adhoc_network()
-    if result:
-        reset_admin_connection()
-    return result
-
 
 # Configuration
 BASE_DIR = os.getcwd()
@@ -945,6 +939,56 @@ def get_image_url(image_id):
         'name': image['name']
     })
 
+# Debug logging for WiFi
+_DM_WIFI_DEBUG_ENV = os.getenv('DM_WIFI_DEBUG', '1')
+_DEBUG_WIFI = not (_DM_WIFI_DEBUG_ENV.lower() in ('0', 'false', 'no', 'off', ''))
+
+def _ts():
+    try:
+        return time.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return ''
+
+def _dbg(msg: str):
+    if _DEBUG_WIFI:
+        try:
+            print(f"[WiFi][{_ts()}] {msg}")
+        except Exception:
+            pass
+
+@app.route('/api/wifi/known', methods=['GET'])
+def api_wifi_known_list():
+    """Return known WiFi networks (SSIDs only; passwords are not exposed)."""
+    try:
+        nets = list_known_networks() or []
+        print(nets)
+        sanitized = [{'ssid': (n.get('ssid') or '')} for n in nets if isinstance(n, dict)]
+        return jsonify({'networks': sanitized})
+    except Exception as e:
+        _dbg(f"API /api/wifi/known Fehler: {type(e).__name__}: {e}")
+        return jsonify({'networks': []}), 200
+
+@app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
+def api_wifi_known_delete(ssid):
+    """Forget an SSID at OS level and remove its credentials from the known list."""
+    try:
+        _dbg(f"API DELETE /api/wifi/known/{ssid} ...")
+        os_removed, known_removed = forget_and_remove_known(ssid)
+        # Recompute status and notify system
+        try:
+            reset_admin_connection()
+        except Exception:
+            pass
+        return jsonify({
+            'success': bool(os_removed or known_removed),
+            'os_removed': bool(os_removed),
+            'known_removed': bool(known_removed),
+            'ssid': ssid
+        })
+    except Exception as e:
+        _dbg(f"API /api/wifi/known DELETE Fehler: {type(e).__name__}: {e}")
+        return jsonify({'success': False, 'error': str(e), 'ssid': ssid}), 500
+
 
 
 # Flask route handlers for WiFi functionality
@@ -952,22 +996,7 @@ def register_wifi_routes(app, on_change=None):
 
     set_change_callback(on_change)
 
-    # Debug logging for WiFi
-    _DM_WIFI_DEBUG_ENV = os.getenv('DM_WIFI_DEBUG', '1')
-    _DEBUG_WIFI = not (_DM_WIFI_DEBUG_ENV.lower() in ('0', 'false', 'no', 'off', ''))
 
-    def _ts():
-        try:
-            return time.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            return ''
-
-    def _dbg(msg: str):
-        if _DEBUG_WIFI:
-            try:
-                print(f"[WiFi][{_ts()}] {msg}")
-            except Exception:
-                pass
 
     @app.route('/api/wifi/status', methods=['GET'])
     def get_wifi_status():
