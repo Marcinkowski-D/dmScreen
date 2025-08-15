@@ -115,10 +115,8 @@ fi
 
 if [ "$ok" -eq 1 ]; then
   WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
-  ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
   echo "[+] AP aktiv. SSID: \"$SSID\"  Passwort: \"$PASS\""
   echo "    AP-IP (wlan0): ${WLAN_IP:-192.168.4.1}"
-  [ -n "$ETH_IP" ] && echo "    LAN-IP (eth0): $ETH_IP"
   exit 0
 else
   echo "[!] hostapd konnte nicht korrekt aktiviert werden. Prüfe Logs: journalctl -u hostapd -b"

@@ -1,7 +1,8 @@
 #!/bin/bash
-# connect-wifi.sh – verbindet wlan0 mit SSID/PW (Client-Modus, eth0 bleibt unberührt)
+# connect-wifi.sh – verbindet wlan0 mit SSID/PW (Client-Modus)
 
 SSID="$1"
+PASS="$2"
 PASS="$2"
 IFACE="wlan0"
 WPA_IF_FILE="/etc/wpa_supplicant/wpa_supplicant-${IFACE}.conf"
@@ -78,11 +79,9 @@ fi
 dhclient -v -1 "$IFACE" || true
 
 WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
-ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
 
 if [ -n "$WLAN_IP" ]; then
   echo "[+] Erfolgreich. WLAN-IP: $WLAN_IP"
 else
   echo "[!] Keine IPv4 via DHCP erhalten."
 fi
-[ -n "$ETH_IP" ] && echo "    LAN-IP (eth0): $ETH_IP"

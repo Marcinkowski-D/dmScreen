@@ -44,8 +44,6 @@ BEGIN{inblk=0}
 wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true
 
 WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
-ETH_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
 
 echo "[+] WLAN \"$SSID\" getrennt und vergessen."
 echo "    WLAN-IP: ${WLAN_IP:- -}"
-[ -n "$ETH_IP" ] && echo "    LAN-IP (eth0): $ETH_IP"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # wifi-status.sh
-# Zeigt kompakten Status für wlan0/eth0, erkennt AP/Client-Modus und typische Konflikte.
+# Zeigt kompakten Status für wlan0, erkennt AP/Client-Modus und typische Konflikte.
 # Nutzung:
 #   sudo ./wifi-status.sh          # ausführlich
 #   sudo ./wifi-status.sh --brief  # kompakt
@@ -9,7 +9,6 @@ BRIEF=0
 [ "$1" = "--brief" ] && BRIEF=1
 
 IF_WLAN="wlan0"
-IF_ETH="eth0"
 WPA_FILE="/etc/wpa_supplicant/wpa_supplicant.conf"
 HOSTAPD_CONF="/etc/hostapd/hostapd.conf"
 DEFAULT_HOSTAPD="/etc/default/hostapd"
@@ -25,17 +24,11 @@ kv(){ printf "  %-22s %s\n" "$1" "$2"; }
 # --- Abschnitt: Interfaces & IPs ---
 hdr "Interfaces & IPs"
 WLAN_LINK=$(ip -o link show "$IF_WLAN" 2>/dev/null | sed 's/^[0-9]*: //')
-ETH_LINK=$(ip -o link show "$IF_ETH" 2>/dev/null | sed 's/^[0-9]*: //')
 WLAN_MAC=$(ip link show "$IF_WLAN" 2>/dev/null | awk '/link\/ether/{print $2}')
-ETH_MAC=$(ip link show "$IF_ETH" 2>/dev/null | awk '/link\/ether/{print $2}')
 WLAN_IP4=$(ip -4 addr show "$IF_WLAN" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
-ETH_IP4=$(ip -4 addr show "$IF_ETH" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
 kv "wlan0 link" "${WLAN_LINK:-(nicht vorhanden)}"
 kv "wlan0 MAC"  "${WLAN_MAC:--}"
 kv "wlan0 IPv4" "${WLAN_IP4:--}"
-kv "eth0 link"  "${ETH_LINK:-(nicht vorhanden)}"
-kv "eth0 MAC"   "${ETH_MAC:--}"
-kv "eth0 IPv4"  "${ETH_IP4:--}"
 
 # --- Abschnitt: RF & Reg ---
 hdr "RF & Regulatorik"
