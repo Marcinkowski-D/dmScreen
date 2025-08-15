@@ -7,6 +7,7 @@ import threading
 import concurrent.futures
 from datetime import datetime
 import hashlib
+import argparse
 
 import dotenv
 
@@ -1027,6 +1028,11 @@ def register_wifi_routes(app, on_change=None):
 
 def main():
     global db
+    # Parse command line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ssid", help="Initial SSID to connect to", required=False)
+    args = parser.parse_args()
+
     # Initialize database
     print('initializing database')
     db = Database(DATABASE_FILE)
@@ -1048,7 +1054,7 @@ def main():
             register_wifi_routes(app, on_change=reset_admin_connection)
 
             # Start monitor thread that waits for GUI-triggered changes
-            start_wifi_monitor()
+            start_wifi_monitor(ssid=args.ssid)
         else:
             print('not Raspberry Pi!')
     else:

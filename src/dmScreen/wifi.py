@@ -346,7 +346,7 @@ def get_scanned_ssids():
     global scanned_ssids
     return scanned_ssids
 
-def wifi_monitor():
+def wifi_monitor(ssid=None):
     global target_wifi, current_wifi, change_callback, known_ssids, scanned_ssids
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
@@ -356,10 +356,14 @@ def wifi_monitor():
         scanned_ssids = _scan_visible_ssids()
     known_ssids = _load_known_networks()
 
-    for k_ssid in known_ssids:
-        if k_ssid['ssid'] in scanned_ssids:
-            target_wifi = k_ssid['ssid']
-            break
+    if ssid is not None:
+        target_wifi = ssid
+        current_wifi = ssid
+    else:
+        for k_ssid in known_ssids:
+            if k_ssid['ssid'] in scanned_ssids:
+                target_wifi = k_ssid['ssid']
+                break
 
     while True:
         if target_wifi is None and current_wifi is not None:
@@ -381,8 +385,8 @@ def wifi_monitor():
 
 
 
-def start_wifi_monitor():
+def start_wifi_monitor(ssid=None):
     """Start the WiFi monitoring thread"""
     _dbg("Starte WiFi-Monitor-Thread ...")
-    threading.Thread(target=wifi_monitor, daemon=True).start()
+    threading.Thread(target=wifi_monitor, kwargs={'ssid': ssid}, daemon=True).start()
     _dbg("WiFi-Monitor-Thread gestartet.")
