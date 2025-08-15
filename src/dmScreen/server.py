@@ -37,13 +37,6 @@ from dmScreen.cache_worker import (
 )
 
 
-def get_lan_ip():
-    try:
-        p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | head -n 1", shell=True)
-        return p.stdout.strip()
-    except Exception as e:
-        print(f"Error getting LAN IP address: {e}")
-        return "127.0.0.1"
 
 from dmScreen.updater import check_for_update
 
@@ -63,6 +56,7 @@ from dmScreen.wifi import (
     check_wifi_connection,
     run_cmd,
     get_scanned_ssids,
+    get_lan_ip,
 )
 
 # Global variables

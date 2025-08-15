@@ -61,6 +61,15 @@ current_wifi = None
 # Helpers for known networks
 # -----------------------------
 
+
+def get_lan_ip():
+    try:
+        p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | head -n 1", shell=True)
+        return p.stdout.strip()
+    except Exception as e:
+        print(f"Error getting LAN IP address: {e}")
+        return "127.0.0.1"
+
 def set_target_wifi(ssid: str):
     global target_wifi
     target_wifi = ssid
@@ -359,6 +368,7 @@ def wifi_monitor(ssid=None):
     if ssid is not None:
         target_wifi = ssid
         current_wifi = ssid
+
     else:
         for k_ssid in known_ssids:
             if k_ssid['ssid'] in scanned_ssids:
