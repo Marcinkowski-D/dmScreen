@@ -21,6 +21,22 @@ const backdrop = document.getElementById('backdrop');
 const backdropText = document.getElementById('backdrop-text');
 const newFolderBtn = document.getElementById('new-folder-btn');
 const folderSelect = document.getElementById('folder-select');
+const themeSelect = document.getElementById('theme-select');
+const adminTitleInput = document.getElementById('admin-title');
+const saveAdminTitleBtn = document.getElementById('save-admin-title');
+const pageTitleEl = document.getElementById('page-title');
+
+function applyAdminTheme(theme) {
+    try {
+        if (theme === 'light') {
+            document.body.classList.add('light');
+        } else {
+            document.body.classList.remove('light');
+        }
+    } catch (e) {
+        // no-op
+    }
+}
 
 // Persistent list of files selected for upload (can be appended via multiple dialog opens)
 let selectedFiles = [];
@@ -181,6 +197,49 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add event listeners for folder management
     newFolderBtn.addEventListener('click', showCreateFolderDialog);
     folderSelect.addEventListener('change', updateUploadFolder);
+
+    // Theme switching
+    if (themeSelect) {
+        themeSelect.addEventListener('change', async () => {
+            const theme = themeSelect.value || 'dark';
+            applyAdminTheme(theme);
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ theme })
+                });
+            } catch (e) {
+                console.error('Failed to save theme setting', e);
+            }
+        });
+    }
+
+    // Admin title save
+    if (saveAdminTitleBtn && adminTitleInput) {
+        saveAdminTitleBtn.addEventListener('click', async () => {
+            const admin_title = (adminTitleInput.value || '').trim();
+            try { if (typeof showBackdrop === 'function') showBackdrop('Saving title...'); } catch (_) {}
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ admin_title })
+                });
+                const data = await response.json();
+                try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
+                if (response.ok && data) {
+                    updateSettings(data);
+                } else {
+                    if (typeof showAlert === 'function') showAlert('Failed to save admin title', 'Error');
+                }
+            } catch (e) {
+                try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
+                if (typeof showAlert === 'function') showAlert('Error saving admin title', 'Error');
+                console.error('Failed to save admin title', e);
+            }
+        });
+    }
 });
 
 // Polling functions
@@ -1514,6 +1573,31 @@ function updateScreensaverOptions() {
 }
 
 function updateSettings(settings) {
+    // Apply and reflect theme
+    try {
+        const theme = (settings && settings.theme) ? settings.theme : 'dark';
+        if (themeSelect) {
+            themeSelect.value = theme;
+        }
+        applyAdminTheme(theme);
+    } catch (_) {}
+
+    // Apply Admin Title to document and UI
+    try {
+        const title = (settings && typeof settings.admin_title === 'string' && settings.admin_title.trim().length > 0)
+            ? settings.admin_title.trim()
+            : 'DM Screen Admin';
+        if (typeof document !== 'undefined') {
+            document.title = title;
+        }
+        if (pageTitleEl) {
+            pageTitleEl.textContent = title;
+        }
+        if (adminTitleInput) {
+            adminTitleInput.value = title;
+        }
+    } catch (_) {}
+
     // Update screensaver selection
     if (settings.screensaver) {
         screensaverSelect.value = settings.screensaver;

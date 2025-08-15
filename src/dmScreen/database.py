@@ -13,7 +13,9 @@ DEFAULT_DATABASE = {
     "folders": [],
     "settings": {
         "screensaver": None,
-        "current_image": None
+        "current_image": None,
+        "theme": "dark",
+        "admin_title": "DM Screen Admin"
     }
 }
 
@@ -40,7 +42,29 @@ class Database:
     def get_database(self):
         with self.lock:
             with open(self.db_file, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            # Migrate/ensure default structure and settings keys
+            changed = False
+            if 'images' not in data or not isinstance(data.get('images'), list):
+                data['images'] = []
+                changed = True
+            if 'folders' not in data or not isinstance(data.get('folders'), list):
+                data['folders'] = []
+                changed = True
+            if 'settings' not in data or not isinstance(data.get('settings'), dict):
+                # Start from defaults
+                data['settings'] = DEFAULT_DATABASE['settings'].copy()
+                changed = True
+            else:
+                # Ensure all default settings keys exist
+                for key, default_val in DEFAULT_DATABASE['settings'].items():
+                    if key not in data['settings']:
+                        data['settings'][key] = default_val
+                        changed = True
+            if changed:
+                # Persist migration so future reads are consistent
+                self.save_database(data)
+            return data
 
     def save_database(self, data):
         with self.lock:
@@ -168,10 +192,9 @@ class Database:
 
     def update_settings(self, config):
         db = self.get_database()
-        # Update settings
+        # Update settings (allow adding new keys as well)
         for key, value in config:
-            if key in db['settings']:
-                db['settings'][key] = value
+            db['settings'][key] = value
 
         self.save_database(db)
 

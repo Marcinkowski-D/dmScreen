@@ -863,6 +863,7 @@ def get_settings():
 @app.route('/api/settings', methods=['POST'])
 def update_settings():
     data = request.get_json()
+    print(data)
     config = data.items()
 
     db.update_settings(config)

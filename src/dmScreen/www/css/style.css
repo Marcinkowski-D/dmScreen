@@ -1077,3 +1077,67 @@ body.admin-theme select option {
   background-color: #1a0f31;
   color: var(--text);
 }
+
+
+/* Light variant for Admin theme */
+body.admin-theme.light {
+  --bg: #f5f7fb;
+  --bg-2: #ffffff;
+  --card-bg: rgba(0, 0, 0, 0.03);
+  --card-bg-2: rgba(0, 0, 0, 0.02);
+  --border: rgba(0, 0, 0, 0.12);
+  --text: #1a1a1a;
+  --muted: #555;
+  --heading: #111;
+  --accent: #6a64ff; /* softer violet */
+  --accent-2: #00a2ff; /* bright blue */
+  --success: #2e7d32;
+  color: var(--text);
+  background-color: var(--bg);
+  background-image: none;
+}
+
+/* Improve contrast for buttons in light theme */
+body.admin-theme.light .btn {
+  color: #ffffff;
+}
+
+/* Viewer light theme overrides */
+.view-body.light {
+  background-color: #f5f7fb;
+  color: #1a1a1a;
+}
+.view-body.light .fullscreen-container {
+  background-color: #f5f7fb;
+}
+
+/* Admin light theme: modal backgrounds and content */
+body.admin-theme.light .modal-dialog {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+}
+body.admin-theme.light .modal-header,
+body.admin-theme.light .modal-footer {
+  background-color: #f8f8f8;
+  border-color: var(--border);
+}
+body.admin-theme.light .modal-header h3 {
+  color: var(--heading);
+}
+body.admin-theme.light .modal-body {
+  background-color: #ffffff;
+  color: var(--text);
+}
+/* Backdrop panels (e.g., loading) in light theme */
+body.admin-theme.light .backdrop-content {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+}
+/* Slightly lighter overlay for light theme to reduce harshness */
+body.admin-theme.light .backdrop {
+  background-color: rgba(0, 0, 0, 0.4);
+}

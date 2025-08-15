@@ -105,7 +105,7 @@
     
     <button id="reset-display" class="btn floating-btn">Reset Display to Screensaver</button>
     <div class="container">
-        <h1>DM Screen Admin</h1>
+        <h1 id="page-title">DM Screen Admin</h1>
         
         <div class="section">
             <h2>Upload Images</h2>
@@ -170,6 +170,21 @@
         
         <div class="section">
             <h2>Settings</h2>
+            <div class="form-group">
+                <label for="admin-title">Admin Title:</label>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" id="admin-title" placeholder="DM Screen Admin" style="max-width: 360px;">
+                    <button id="save-admin-title" class="btn">Save</button>
+                </div>
+                <small>The title shown in the browser tab and as the page heading.</small>
+            </div>
+            <div class="form-group">
+                <label for="theme-select">Theme:</label>
+                <select id="theme-select">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                </select>
+            </div>
             <div class="form-group">
                 <label>Screensaver Image:</label>
                 <div class="screensaver-preview">
