@@ -1026,6 +1026,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ssid", help="Initial SSID to connect to", required=False)
     args = parser.parse_args()
+    if args.ssid is not None:
+        print('################################')
+        print(args.ssid, 'given')
+        print('################################')
 
     # Initialize database
     print('initializing database')
