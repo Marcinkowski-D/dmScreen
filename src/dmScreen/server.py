@@ -263,6 +263,9 @@ def serve_img(path):
     # Function to generate thumbnail in a separate thread
     def generate_thumbnail(original_path, file_path):
         try:
+            # Get image quality setting from database
+            quality = db.get_database()['settings'].get('image_quality', 85)
+            
             original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
             with Image.open(original_file_path) as img:
                 # Convert to RGB if image has transparency
@@ -287,13 +290,13 @@ def serve_img(path):
                 
                 # Save as WebP with optimized settings
                 if file_path.lower().endswith('.webp'):
-                    img.save(file_path, format="WebP", quality=85)
+                    img.save(file_path, format="WebP", quality=quality)
                     new_path = path
                 else:
                     # Get the filename without extension
                     base_name = os.path.splitext(file_path)[0]
                     new_file_path = f"{base_name}.webp"
-                    img.save(new_file_path, format="WebP", quality=85)
+                    img.save(new_file_path, format="WebP", quality=quality)
                     file_path = new_file_path
                     new_path = os.path.basename(new_file_path)
                 
@@ -426,8 +429,11 @@ def serve_img(path):
             w = int(1080 * (img.size[0]/img.size[1]))
             img = img.resize((w, 1080), Image.BILINEAR)
 
+        # Get image quality setting from database
+        quality = db.get_database()['settings'].get('image_quality', 85)
+        
         # Save to cache
-        img.save(cache_path, format="WebP", quality=85)
+        img.save(cache_path, format="WebP", quality=quality)
         
         # If this is a width-specific request, trigger background caching of other images
         if w is not None and not is_thumb and not crop:
@@ -675,16 +681,19 @@ def upload_image():
         
         thumb_filename = filename  # Default in case of failure
         
+        # Get image quality setting from database
+        quality = db.get_database()['settings'].get('image_quality', 85)
+        
         try:
             with Image.open(filepath) as img:
                 processed_img = img.copy()
                 if filepath.lower().endswith('.webp'):
-                    processed_img.save(filepath, format="WebP")
+                    processed_img.save(filepath, format="WebP", quality=quality)
                 else:
                     # Get the filename without extension
                     base_name = os.path.splitext(filepath)[0]
                     new_filepath = f"{base_name}.webp"
-                    processed_img.save(new_filepath, format="WebP")
+                    processed_img.save(new_filepath, format="WebP", quality=quality)
                     # Update the filepath and filename
                     os.remove(filepath)  # Remove the original file
                     filepath = new_filepath
@@ -703,12 +712,12 @@ def upload_image():
                 img.thumbnail((250, 250))
 
                 if thumb_filepath.lower().endswith('.webp'):
-                    img.save(thumb_filepath, format="WebP")
+                    img.save(thumb_filepath, format="WebP", quality=quality)
                 else:
                     # Get the filename without extension
                     base_name = os.path.splitext(thumb_filepath)[0]
                     new_thumb_filepath = f"{base_name}.webp"
-                    img.save(new_thumb_filepath, format="WebP")
+                    img.save(new_thumb_filepath, format="WebP", quality=quality)
                     # Update the thumbnail filepath and filename
                     thumb_filename = os.path.basename(new_thumb_filepath)
         except Exception as e:

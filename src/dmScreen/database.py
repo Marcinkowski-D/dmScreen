@@ -15,7 +15,8 @@ DEFAULT_DATABASE = {
         "screensaver": None,
         "current_image": None,
         "theme": "dark",
-        "admin_title": "DM Screen Admin"
+        "admin_title": "DM Screen Admin",
+        "image_quality": 85
     }
 }
 

@@ -29,11 +29,12 @@ PRIORITY_OTHER_IMAGES = 20
 class CacheJob:
     """Represents a job to cache an image with specific parameters."""
     
-    def __init__(self, image_path: str, width: Optional[int], img_hash:str, crop: bool, priority: int):
+    def __init__(self, image_path: str, width: Optional[int], img_hash:str, crop: bool, priority: int, quality: int = 85):
         self.image_path = image_path
         self.width = width
         self.crop = crop
         self.priority = priority
+        self.quality = quality
 
         # Create a cache key based on the path and width
         self.cache_key = f"{image_path}_{width}_{'crop' if crop else 'nocrop'}_{img_hash}"
@@ -127,8 +128,8 @@ def cache_worker(cache_folder: str, upload_folder: str):
                         w = int(1080 * (img.size[0]/img.size[1]))
                         img = img.resize((w, 1080), Image.BILINEAR)
                     
-                    # Save to cache
-                    img.save(cache_path, format="WebP", quality=85)
+                    # Save to cache with quality from job
+                    img.save(cache_path, format="WebP", quality=job.quality)
                     print(f"Cached image saved: {cache_path}")
             
             except Exception as e:
@@ -169,6 +170,9 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
         database = db.get_database()
         all_images = database['images']
         
+        # Get image quality setting from database
+        quality = database['settings'].get('image_quality', 85)
+        
         # Find the current image in the database
         current_image = next((img for img in all_images if img['path'] == image_path), None)
         if not current_image:
@@ -183,7 +187,7 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
         
         for img in same_folder_images:
             img_hash = hashlib.md5(json.dumps(img).encode()).hexdigest()
-            job = CacheJob(img['path'], width, img_hash, crop, PRIORITY_SAME_FOLDER)
+            job = CacheJob(img['path'], width, img_hash, crop, PRIORITY_SAME_FOLDER, quality)
             if job.cache_key not in cached_images:
                 cache_queue.put(job)
         
@@ -193,7 +197,7 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
         
         for img in other_images:
             img_hash = hashlib.md5(json.dumps(img).encode()).hexdigest()
-            job = CacheJob(img['path'], width, img_hash, crop, PRIORITY_OTHER_IMAGES)
+            job = CacheJob(img['path'], width, img_hash, crop, PRIORITY_OTHER_IMAGES, quality)
             if job.cache_key not in cached_images:
                 cache_queue.put(job)
                 
