@@ -111,8 +111,9 @@ def cache_worker(cache_folder: str, upload_folder: str):
                 print(f"Background caching: {job.image_path} (width={job.width}, crop={job.crop})")
                 
                 # Open and process the image
-                with Image.open(file_path) as img:
+                with Image.open(file_path) as original_img:
                     # Handle crop if needed (simplified - actual cropping would use the same logic as in server.py)
+                    img = original_img
                     if job.crop:
                         # In a real implementation, we would apply the same crop logic as in server.py
                         # For now, we'll just use the original image
@@ -121,16 +122,26 @@ def cache_worker(cache_folder: str, upload_folder: str):
                     # Resize the image if width is specified
                     if job.width and img.size[0] > job.width:
                         h = int(job.width / (img.size[0]/img.size[1]))
-                        img = img.resize((job.width, h), Image.BILINEAR)
+                        resized_img = img.resize((job.width, h), Image.BILINEAR)
+                        if img is not original_img:
+                            img.close()
+                        img = resized_img
                     
                     # Ensure height is not too large
                     if img.size[1] > 1080:
                         w = int(1080 * (img.size[0]/img.size[1]))
-                        img = img.resize((w, 1080), Image.BILINEAR)
+                        resized_img = img.resize((w, 1080), Image.BILINEAR)
+                        if img is not original_img:
+                            img.close()
+                        img = resized_img
                     
                     # Save to cache with quality from job
                     img.save(cache_path, format="WebP", quality=job.quality)
                     print(f"Cached image saved: {cache_path}")
+                    
+                    # Close the final image if it's different from the original
+                    if img is not original_img:
+                        img.close()
             
             except Exception as e:
                 print(f"Error caching image {job.image_path}: {e}")

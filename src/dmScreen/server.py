@@ -267,8 +267,9 @@ def serve_img(path):
             quality = db.get_database()['settings'].get('image_quality', 85)
             
             original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
-            with Image.open(original_file_path) as img:
+            with Image.open(original_file_path) as original_img:
                 # Convert to RGB if image has transparency
+                img = original_img
                 if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
                     background = Image.new('RGB', img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
@@ -286,7 +287,10 @@ def serve_img(path):
                     new_width = int(width * (250 / height))
                 
                 # Resize using BILINEAR filter (faster than default)
-                img = img.resize((new_width, new_height), Image.BILINEAR)
+                resized_img = img.resize((new_width, new_height), Image.BILINEAR)
+                if img is not original_img:
+                    img.close()
+                img = resized_img
                 
                 # Save as WebP with optimized settings
                 if file_path.lower().endswith('.webp'):
@@ -299,6 +303,10 @@ def serve_img(path):
                     img.save(new_file_path, format="WebP", quality=quality)
                     file_path = new_file_path
                     new_path = os.path.basename(new_file_path)
+                
+                # Close the final image if it's different from the original
+                if img is not original_img:
+                    img.close()
                 
                 # Update database to include thumb_path
                 db.updateImageThumbnail(original_path, new_path)
@@ -362,23 +370,39 @@ def serve_img(path):
                 response.headers['Expires'] = '0'
                 return response
 
-            img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+            original_img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+            img = original_img
 
             if image_meta.get("mirror", None) is not None:
                 if image_meta["mirror"].get("h", False):
-                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                    transformed_img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                    if img is not original_img:
+                        img.close()
+                    img = transformed_img
                 if image_meta["mirror"].get("v", False):
-                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    transformed_img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    if img is not original_img:
+                        img.close()
+                    img = transformed_img
 
             flip_wh = False
             if image_meta.get("rotate", None) is not None:
                 r = image_meta["rotate"]
                 if r == 270:
-                    img = img.rotate(90, expand=True)
+                    rotated_img = img.rotate(90, expand=True)
+                    if img is not original_img:
+                        img.close()
+                    img = rotated_img
                 elif r == 180:
-                    img = img.rotate(180, expand=True)
+                    rotated_img = img.rotate(180, expand=True)
+                    if img is not original_img:
+                        img.close()
+                    img = rotated_img
                 elif r == 90:
-                    img = img.rotate(-90, expand=True)
+                    rotated_img = img.rotate(-90, expand=True)
+                    if img is not original_img:
+                        img.close()
+                    img = rotated_img
 
             screen_size = (1920, 1080)
             crop_data = image_meta['crop']
@@ -414,26 +438,41 @@ def serve_img(path):
             y2 /= scale
             x2 /= scale
 
-            img = img.crop((x1, y1, x2, y2))
+            cropped_img = img.crop((x1, y1, x2, y2))
+            if img is not original_img:
+                img.close()
+            img = cropped_img
         else:
             # Create a response with cache control headers to prevent caching
-            img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+            original_img = Image.open(os.path.join(UPLOAD_FOLDER, path))
+            img = original_img
 
         w = w if w is not None else 1920
 
         # Use BILINEAR filter for faster resizing
         if img.size[0] > w:
             h = int(w / (img.size[0]/img.size[1]))
-            img = img.resize((w, h), Image.BILINEAR)
+            resized_img = img.resize((w, h), Image.BILINEAR)
+            if img is not original_img:
+                img.close()
+            img = resized_img
         if img.size[1] > 1080:
             w = int(1080 * (img.size[0]/img.size[1]))
-            img = img.resize((w, 1080), Image.BILINEAR)
+            resized_img = img.resize((w, 1080), Image.BILINEAR)
+            if img is not original_img:
+                img.close()
+            img = resized_img
 
         # Get image quality setting from database
         quality = db.get_database()['settings'].get('image_quality', 85)
         
         # Save to cache
         img.save(cache_path, format="WebP", quality=quality)
+        
+        # Close the final image
+        if img is not original_img:
+            img.close()
+        original_img.close()
         
         # If this is a width-specific request, trigger background caching of other images
         if w is not None and not is_thumb and not crop:
@@ -687,17 +726,21 @@ def upload_image():
         try:
             with Image.open(filepath) as img:
                 processed_img = img.copy()
-                if filepath.lower().endswith('.webp'):
-                    processed_img.save(filepath, format="WebP", quality=quality)
-                else:
-                    # Get the filename without extension
-                    base_name = os.path.splitext(filepath)[0]
-                    new_filepath = f"{base_name}.webp"
-                    processed_img.save(new_filepath, format="WebP", quality=quality)
-                    # Update the filepath and filename
-                    os.remove(filepath)  # Remove the original file
-                    filepath = new_filepath
-                    filename = os.path.basename(new_filepath)
+                try:
+                    if filepath.lower().endswith('.webp'):
+                        processed_img.save(filepath, format="WebP", quality=quality)
+                    else:
+                        # Get the filename without extension
+                        base_name = os.path.splitext(filepath)[0]
+                        new_filepath = f"{base_name}.webp"
+                        processed_img.save(new_filepath, format="WebP", quality=quality)
+                        # Update the filepath and filename
+                        os.remove(filepath)  # Remove the original file
+                        filepath = new_filepath
+                        filename = os.path.basename(new_filepath)
+                finally:
+                    # Close the copied image
+                    processed_img.close()
         except Exception as e:
             print(f"Error processing image: {e}")
             return None
