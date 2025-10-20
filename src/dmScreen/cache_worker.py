@@ -181,8 +181,8 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
         database = db.get_database()
         all_images = database['images']
         
-        # Get image quality setting from database
-        quality = database['settings'].get('image_quality', 85)
+        # Get image quality setting from database (Fix #11)
+        quality = db.get_setting('image_quality', 85)
         
         # Find the current image in the database
         current_image = next((img for img in all_images if img['path'] == image_path), None)

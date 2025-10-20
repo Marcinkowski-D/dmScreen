@@ -128,6 +128,44 @@ class Database:
             if not self._image_index and self._cache:
                 self._rebuild_index()
             return self._image_index.get(path)
+    
+    def get_setting(self, key, default=None):
+        """
+        Get a single setting without copying the entire database.
+        
+        This is much more efficient than db.get_database()['settings'].get(key)
+        because it avoids the expensive deep copy of the entire database.
+        
+        Args:
+            key: Setting key to retrieve
+            default: Default value if key doesn't exist
+            
+        Returns:
+            Setting value or default
+        """
+        with self.lock:
+            # Ensure cache is loaded
+            if self._cache is None:
+                self.get_database()
+            # Return setting value directly (no deep copy needed for single values)
+            return self._cache.get('settings', {}).get(key, default)
+    
+    def get_all_settings(self):
+        """
+        Get all settings with shallow copy.
+        
+        This is more efficient than db.get_database()['settings'] because
+        it only copies the settings dictionary, not the entire database.
+        
+        Returns:
+            Dictionary of all settings
+        """
+        with self.lock:
+            # Ensure cache is loaded
+            if self._cache is None:
+                self.get_database()
+            # Shallow copy is sufficient for settings (no nested mutable objects)
+            return self._cache.get('settings', {}).copy()
 
     def appendImage(self, image_data):
         # Add default transformation properties if not present
@@ -428,48 +466,17 @@ class Database:
         
     def _invalidate_image_cache(self, image_path):
         """
-        Delete all cache files related to a specific image path
+        Cache invalidation is handled automatically by img_hash in cache_key (Fix #12).
         
-        This is called when an image is transformed to ensure users see the updated version
+        When image metadata changes (transformation, rotation, etc.), the img_hash 
+        changes automatically, which creates a new cache_key. This means:
+        - Old cache files are no longer referenced
+        - New transformations create new cache files
+        - Old files will be cleaned up by periodic cleanup_cache()
+        
+        This approach eliminates the need for expensive directory listings and
+        multiple os.path.exists() checks on every transformation.
         """
-        try:
-            # Get the cache folder path from the server module
-            import os
-            from pathlib import Path
-            
-            # Find the cache folder (should be in data/cache relative to the current working directory)
-            base_dir = os.getcwd()
-            cache_folder = os.path.join(base_dir, 'data', 'cache')
-            
-            if not os.path.exists(cache_folder):
-                return
-                
-            # Find all cache files that contain this image path in their hash
-            # Since we can't reverse the hash, we'll need to check all cache files
-            # by creating potential cache keys and checking if their hashes exist
-            
-            # List all files in the cache directory
-            cache_files = os.listdir(cache_folder)
-            
-            # Generate possible cache keys for different widths and crop settings
-            # Common widths used in the application
-            widths = [None, 250, 500, 1000, 1920]
-            crop_settings = [True, False]
-            
-            # Check each possible combination
-            for width in widths:
-                for crop in crop_settings:
-                    # Create the cache key as done in server.py
-                    w_str = f"_{width}" if width else ""
-                    cache_key = f"{image_path}{w_str}_{'crop' if crop else 'nocrop'}"
-                    cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
-                    cache_file = f"{cache_hash}.webp"
-                    
-                    # If this cache file exists, delete it
-                    cache_path = os.path.join(cache_folder, cache_file)
-                    if os.path.exists(cache_path):
-                        os.remove(cache_path)
-                        print(f"Invalidated cache for transformed image: {cache_path}")
-        except Exception as e:
-            print(f"Error invalidating image cache: {e}")
+        # No immediate invalidation needed - handled automatically via img_hash
+        pass
             # Don't raise the exception - cache invalidation should not block the main operation

@@ -74,6 +74,12 @@ NETWORK_STATUS_CACHE = {
     'admin_url': None,
 }
 
+# Cache for view.html to avoid reading from SD-card on every request (Fix #9)
+_view_html_cache = None
+
+# Track last cleanup_cache() check to reduce frequency (Fix #8)
+last_cache_cleanup_check = 0
+
 
 def recompute_network_status():
     """Recompute and cache network status: connected, ssid, adhoc_active, and admin_url."""
@@ -215,29 +221,32 @@ def admin():
 
 @app.route('/view')
 def view():
-    global admin_connected
-    view_path = os.path.join(WWW_FOLDER, 'view.html')
+    global admin_connected, _view_html_cache
     
-    if os.path.exists(view_path):
-        # If admin hasn't connected, inject the IP address into the HTML
-        if not admin_connected:
+    # Load HTML content into cache on first request (Fix #9)
+    if _view_html_cache is None:
+        view_path = os.path.join(WWW_FOLDER, 'view.html')
+        if os.path.exists(view_path):
             with open(view_path, 'r') as file:
-                html_content = file.read()
-
-            # Return the modified HTML
-            return html_content
+                _view_html_cache = file.read()
         else:
-            # Admin has connected, serve the original file
-            return send_from_directory(WWW_FOLDER, 'view.html')
-    else:
-        return f"File not found: {view_path}", 404
+            return f"File not found: {view_path}", 404
+    
+    # Return cached HTML content
+    return _view_html_cache
 
 
 
 @app.route('/img/<path:path>')
 def serve_img(path):
-    # Run cache cleanup periodically
-    cleanup_cache()
+    # Run cache cleanup periodically (Fix #8: only check every 5 minutes)
+    global last_cache_cleanup_check
+    current_time = time.time()
+    
+    # Only check cleanup every 5 minutes instead of on every request
+    if current_time - last_cache_cleanup_check > 300:  # 300 seconds = 5 minutes
+        last_cache_cleanup_check = current_time
+        cleanup_cache()
     
     # Get query parameters
     w = request.args.get("w", None)
@@ -263,8 +272,8 @@ def serve_img(path):
     # Function to generate thumbnail in a separate thread
     def generate_thumbnail(original_path, file_path):
         try:
-            # Get image quality setting from database
-            quality = db.get_database()['settings'].get('image_quality', 85)
+            # Get image quality setting from database (Fix #11)
+            quality = db.get_setting('image_quality', 85)
             
             original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
             with Image.open(original_file_path) as original_img:
@@ -449,8 +458,8 @@ def serve_img(path):
                 img.close()
             img = resized_img
 
-        # Get image quality setting from database
-        quality = db.get_database()['settings'].get('image_quality', 85)
+        # Get image quality setting from database (Fix #11)
+        quality = db.get_setting('image_quality', 85)
         
         # Save to cache
         img.save(cache_path, format="WebP", quality=quality)
@@ -692,6 +701,10 @@ def upload_image():
         if not folder_exists:
             return jsonify({'error': 'Folder not found'}), 404
     
+    # Get image quality setting ONCE before thread pool (Fix #13)
+    # This avoids multiple threads calling db.get_database() simultaneously
+    quality = db.get_setting('image_quality', 85)
+    
     # Function to process a single image in a separate thread
     def process_image(file_index, file):
         if not file or not allowed_file(file.filename):
@@ -706,8 +719,7 @@ def upload_image():
         
         thumb_filename = filename  # Default in case of failure
         
-        # Get image quality setting from database
-        quality = db.get_database()['settings'].get('image_quality', 85)
+        # Use quality from closure (passed from outer scope)
         
         try:
             with Image.open(filepath) as img:
