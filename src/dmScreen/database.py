@@ -33,6 +33,7 @@ class Database:
         self.lock = threading.RLock()  # Reentrant lock for thread safety
         self._cache = None  # In-memory cache
         self._cache_timestamp = 0  # Timestamp when cache was last loaded
+        self._image_index = {}  # O(1) lookup index: path -> image metadata
         self.init_database()
 
 
@@ -77,10 +78,14 @@ class Database:
                     # Note: save_database will invalidate cache, so we need to set it again
                     self._cache = data
                     self._cache_timestamp = os.path.getmtime(self.db_file)
+                    # Rebuild index after loading new data
+                    self._rebuild_index()
                 else:
                     # Cache the data
                     self._cache = data
                     self._cache_timestamp = file_mtime
+                    # Rebuild index after loading new data
+                    self._rebuild_index()
             
             # Return a deep copy to prevent external modifications from affecting cache
             import copy
@@ -93,6 +98,36 @@ class Database:
             # Invalidate cache so next get_database() will reload from disk
             self._cache = None
             self._cache_timestamp = 0
+            # Invalidate image index so it will be rebuilt on next access
+            self._image_index = {}
+
+    def _rebuild_index(self):
+        """Rebuild the image index for O(1) path lookups."""
+        self._image_index = {}
+        if self._cache and 'images' in self._cache:
+            for img in self._cache.get('images', []):
+                # Index by main path
+                if 'path' in img:
+                    self._image_index[img['path']] = img
+                # Also index by thumbnail path if it exists
+                if 'thumb_path' in img:
+                    self._image_index[img['thumb_path']] = img
+
+    def get_image_by_path(self, path):
+        """
+        Get image metadata by path with O(1) lookup instead of O(n) linear search.
+        
+        Args:
+            path: Image path or thumbnail path to look up
+            
+        Returns:
+            Image metadata dictionary or None if not found
+        """
+        with self.lock:
+            # Ensure index is built
+            if not self._image_index and self._cache:
+                self._rebuild_index()
+            return self._image_index.get(path)
 
     def appendImage(self, image_data):
         # Add default transformation properties if not present

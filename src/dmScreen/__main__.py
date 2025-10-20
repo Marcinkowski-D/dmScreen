@@ -251,9 +251,9 @@ def serve_img(path):
     is_thumb = path.startswith('thumb_')
     file_path = os.path.join(UPLOAD_FOLDER, path)
 
-    images = db.get_database().get('images')
-    image_meta = next((img for img in images if img['path'] == path or img['thumb_path'] == path), None)
-    img_hash = hashlib.md5(json.dumps(image_meta).encode()).hexdigest()
+    # Use O(1) lookup instead of O(n) linear search
+    image_meta = db.get_image_by_path(path)
+    img_hash = hashlib.md5(json.dumps(image_meta).encode()).hexdigest() if image_meta else 'default'
     
     # Create a cache key based on the path and width
     cache_key = f"{path}_{w}_{'crop' if crop else 'nocrop'}_{img_hash}"
@@ -275,22 +275,8 @@ def serve_img(path):
                     background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
                     img = background
                 
-                # Get original dimensions
-                width, height = img.size
-                
-                # Calculate new dimensions while maintaining aspect ratio
-                if width > height:
-                    new_width = 250
-                    new_height = int(height * (250 / width))
-                else:
-                    new_height = 250
-                    new_width = int(width * (250 / height))
-                
-                # Resize using BILINEAR filter (faster than default)
-                resized_img = img.resize((new_width, new_height), Image.BILINEAR)
-                if img is not original_img:
-                    img.close()
-                img = resized_img
+                # Use PIL's thumbnail() method - more efficient and maintains aspect ratio automatically
+                img.thumbnail((250, 250), Image.BILINEAR)
                 
                 # Save as WebP with optimized settings
                 if file_path.lower().endswith('.webp'):
@@ -358,8 +344,8 @@ def serve_img(path):
                     except concurrent.futures.TimeoutError:
                         print("Thumbnail generation timed out")
         
-        # search database entry
-        image_meta = next((img for img in db.get_database()['images'] if img['path'] == path or img['thumb_path'] == path), None)
+        # Get image metadata with O(1) lookup (path might have changed after thumbnail generation)
+        image_meta = db.get_image_by_path(path)
 
         if crop:
             crop_path = os.path.join(UPLOAD_FOLDER, 'crop_'+path)
@@ -751,8 +737,8 @@ def upload_image():
         try:
             # Open the image and create a thumbnail
             with Image.open(filepath) as img:
-                # Calculate new dimensions while maintaining aspect ratio
-                img.thumbnail((250, 250))
+                # Use PIL's thumbnail() method with BILINEAR filter for optimal performance
+                img.thumbnail((250, 250), Image.BILINEAR)
 
                 if thumb_filepath.lower().endswith('.webp'):
                     img.save(thumb_filepath, format="WebP", quality=quality)

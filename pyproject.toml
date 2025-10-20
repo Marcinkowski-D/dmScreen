@@ -28,4 +28,4 @@ source = "vcs"
 packages = ["src/dmScreen"]
 
 [project.scripts]
-dmScreen-server = "dmScreen.server:main"
+dmScreen-server = "dmScreen.__main__:main"
