@@ -15,6 +15,17 @@ echo "[*] Ziel: mit SSID \"$SSID\" verbinden."
 # AP sicher aus
 systemctl stop hostapd >/dev/null 2>&1 || true
 
+# dnsmasq Snippet entfernen und Service neu laden/stoppen
+DNSMASQ_SNIPPET="/etc/dnsmasq.d/dmscreen.conf"
+if [ -f "$DNSMASQ_SNIPPET" ]; then
+  rm -f "$DNSMASQ_SNIPPET"
+  echo "[*] dnsmasq Snippet entfernt, lade Service neu..."
+  systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null 2>&1 || true
+fi
+
+# Sicherstellen, dass kein DHCP-Server mehr auf wlan0 läuft
+pkill -f "dnsmasq.*wlan0" >/dev/null 2>&1 || true
+
 # WLAN bereit machen
 rfkill unblock wifi 2>/dev/null || true
 ip link set "$IFACE" down 2>/dev/null || true
@@ -82,6 +93,35 @@ WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
 
 if [ -n "$WLAN_IP" ]; then
   echo "[+] Erfolgreich. WLAN-IP: $WLAN_IP"
+  
+  # Sicherstellen, dass wlan0 eine funktionierende Default-Route hat
+  # Prüfe ob bereits eine Default-Route über wlan0 existiert
+  if ! ip route show default | grep -q "dev $IFACE"; then
+    # Hole Gateway-Adresse aus der Routing-Tabelle oder DHCP-Lease
+    # Versuche zuerst, Gateway aus den wlan0-spezifischen Routen zu extrahieren
+    GATEWAY=$(ip route show dev "$IFACE" | grep -v "default" | awk '/proto (dhcp|kernel)/{print $1}' | head -n1 | cut -d/ -f1)
+    
+    if [ -n "$GATEWAY" ]; then
+      # Berechne Gateway aus dem Subnetz (typischerweise .1 im Netzwerk)
+      SUBNET=$(echo "$GATEWAY" | cut -d. -f1-3)
+      GATEWAY="${SUBNET}.1"
+    else
+      # Fallback: Verwende .1 basierend auf der wlan0 IP
+      SUBNET=$(echo "$WLAN_IP" | cut -d. -f1-3)
+      GATEWAY="${SUBNET}.1"
+    fi
+    
+    echo "[*] Setze Default-Route über Gateway $GATEWAY dev $IFACE mit Metric 600..."
+    ip route add default via "$GATEWAY" dev "$IFACE" metric 600 2>/dev/null || {
+      echo "[!] Warnung: Konnte keine Default-Route hinzufügen (möglicherweise existiert bereits eine)"
+    }
+  else
+    echo "[*] Default-Route über $IFACE bereits vorhanden."
+  fi
+  
+  # Zeige finale Routing-Tabelle für Debugging
+  echo "[*] Aktuelle Default-Routen:"
+  ip route show default
 else
   echo "[!] Keine IPv4 via DHCP erhalten."
 fi
