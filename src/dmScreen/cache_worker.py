@@ -16,7 +16,7 @@ from PIL import Image
 # Global variables
 cache_queue = queue.PriorityQueue()
 active_workers = 0
-max_workers = 3
+max_workers = 1  # Reduced from 3 to 1 for Raspberry Pi 3B+ (limited CPU resources)
 worker_threads = []
 cached_images = set()  # Set to track which images have been cached
 cache_lock = threading.RLock()  # Lock for thread-safe operations

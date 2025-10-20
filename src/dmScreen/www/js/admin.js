@@ -172,7 +172,7 @@ async function showConfirm(message, title = 'Confirmation') {
 
 // Polling variables
 let lastUpdateTimestamp = 0;
-const POLLING_INTERVAL = 2000; // Poll every 2 seconds
+const POLLING_INTERVAL = 5000; // Poll every 5 seconds (reduced from 2s for Raspberry Pi 3B+)
 
 // Track previous network signature to detect changes
 let _prevNetworkSignature = null;

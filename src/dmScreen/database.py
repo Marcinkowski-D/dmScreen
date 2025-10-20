@@ -31,6 +31,8 @@ class Database:
     def __init__(self, db_file):
         self.db_file = db_file
         self.lock = threading.RLock()  # Reentrant lock for thread safety
+        self._cache = None  # In-memory cache
+        self._cache_timestamp = 0  # Timestamp when cache was last loaded
         self.init_database()
 
 
@@ -41,36 +43,56 @@ class Database:
                     json.dump(DEFAULT_DATABASE, f, indent=4)
 
     def get_database(self):
+        """Get database with in-memory caching to reduce disk I/O"""
         with self.lock:
-            with open(self.db_file, 'r') as f:
-                data = json.load(f)
-            # Migrate/ensure default structure and settings keys
-            changed = False
-            if 'images' not in data or not isinstance(data.get('images'), list):
-                data['images'] = []
-                changed = True
-            if 'folders' not in data or not isinstance(data.get('folders'), list):
-                data['folders'] = []
-                changed = True
-            if 'settings' not in data or not isinstance(data.get('settings'), dict):
-                # Start from defaults
-                data['settings'] = DEFAULT_DATABASE['settings'].copy()
-                changed = True
-            else:
-                # Ensure all default settings keys exist
-                for key, default_val in DEFAULT_DATABASE['settings'].items():
-                    if key not in data['settings']:
-                        data['settings'][key] = default_val
-                        changed = True
-            if changed:
-                # Persist migration so future reads are consistent
-                self.save_database(data)
-            return data
+            # Check if we need to reload from disk
+            # Load from file only if cache is empty or file was modified
+            file_mtime = os.path.getmtime(self.db_file)
+            if self._cache is None or file_mtime > self._cache_timestamp:
+                # Load from disk
+                with open(self.db_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Migrate/ensure default structure and settings keys
+                changed = False
+                if 'images' not in data or not isinstance(data.get('images'), list):
+                    data['images'] = []
+                    changed = True
+                if 'folders' not in data or not isinstance(data.get('folders'), list):
+                    data['folders'] = []
+                    changed = True
+                if 'settings' not in data or not isinstance(data.get('settings'), dict):
+                    # Start from defaults
+                    data['settings'] = DEFAULT_DATABASE['settings'].copy()
+                    changed = True
+                else:
+                    # Ensure all default settings keys exist
+                    for key, default_val in DEFAULT_DATABASE['settings'].items():
+                        if key not in data['settings']:
+                            data['settings'][key] = default_val
+                            changed = True
+                if changed:
+                    # Persist migration so future reads are consistent
+                    self.save_database(data)
+                    # Note: save_database will invalidate cache, so we need to set it again
+                    self._cache = data
+                    self._cache_timestamp = os.path.getmtime(self.db_file)
+                else:
+                    # Cache the data
+                    self._cache = data
+                    self._cache_timestamp = file_mtime
+            
+            # Return a deep copy to prevent external modifications from affecting cache
+            import copy
+            return copy.deepcopy(self._cache)
 
     def save_database(self, data):
         with self.lock:
             with open(self.db_file, 'w') as f:
                 json.dump(data, f, indent=4)
+            # Invalidate cache so next get_database() will reload from disk
+            self._cache = None
+            self._cache_timestamp = 0
 
     def appendImage(self, image_data):
         # Add default transformation properties if not present

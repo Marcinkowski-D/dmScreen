@@ -426,7 +426,7 @@ def wifi_monitor(ssid=None):
                     change_callback()
                 except Exception:
                     pass
-        time.sleep(1)
+        time.sleep(10)  # Increased from 1 to 10 seconds to reduce CPU load on Raspberry Pi 3B+
 
 
 
