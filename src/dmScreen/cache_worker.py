@@ -176,6 +176,14 @@ def queue_image_for_caching(image_path: str, width: Optional[int], crop: bool,
         if active_workers >= max_workers:
             return
     
+    # IMPORTANT: When crop=True, do NOT pre-cache other images!
+    # Crop settings are image-specific, and pre-caching all images with crop
+    # causes massive RAM usage and server freezing. Only pre-cache for width-only operations.
+    if crop:
+        # For crop operations, don't queue any additional images
+        # The requested image will be cached on-demand when served
+        return
+    
     try:
         # Get all images from the database
         database = db.get_database()

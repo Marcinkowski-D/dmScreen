@@ -317,7 +317,7 @@ def serve_img(path):
             print(f"Using cached image: {cache_path}")
             
             # If this is a width-specific request, trigger background caching of other images
-            if w is not None and not is_thumb:
+            if w is not None and not is_thumb and not crop:
                 # Start background caching for other images with the same width
                 threading.Thread(
                     target=queue_image_for_caching,
@@ -854,16 +854,16 @@ def transform_image(image_id):
         image = next((img for img in db_data['images'] if img['id'] == image_id), None)
         
         if image and 'path' in image:
-            # Trigger background caching for common image sizes with both crop settings
-            # This ensures all cached versions are updated after transformation
+            # Trigger background caching for common image sizes
+            # Only cache non-crop versions - crop is image-specific and cached on-demand
+            # This prevents massive RAM usage when saving crop settings
             widths = [None, 250, 500, 1000, 1920]
             for width in widths:
-                for crop_setting in [True, False]:
-                    threading.Thread(
-                        target=queue_image_for_caching,
-                        args=(image['path'], width, crop_setting, db, UPLOAD_FOLDER),
-                        daemon=True
-                    ).start()
+                threading.Thread(
+                    target=queue_image_for_caching,
+                    args=(image['path'], width, False, db, UPLOAD_FOLDER),
+                    daemon=True
+                ).start()
         
         return jsonify({'success': True})
     except Exception as e:
