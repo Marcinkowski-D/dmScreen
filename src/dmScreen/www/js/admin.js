@@ -28,6 +28,7 @@ const savePrimaryColorBtn = document.getElementById('save-primary-color');
 const adminTitleInput = document.getElementById('admin-title');
 const saveAdminTitleBtn = document.getElementById('save-admin-title');
 const pageTitleEl = document.getElementById('page-title');
+const regenerateThumbnailsBtn = document.getElementById('regenerate-thumbnails-btn');
 
 // Color utility functions
 function hexToRgb(hex) {
@@ -366,6 +367,57 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
                 if (typeof showAlert === 'function') showAlert('Error saving admin title', 'Error');
                 console.error('Failed to save admin title', e);
+            }
+        });
+    }
+
+    // Regenerate thumbnails
+    if (regenerateThumbnailsBtn) {
+        regenerateThumbnailsBtn.addEventListener('click', async () => {
+            // Ask for confirmation before starting
+            const confirmed = confirm('This will clear the cache and regenerate all thumbnails. This may take a few moments depending on the number of images. Continue?');
+            if (!confirmed) return;
+
+            try { if (typeof showBackdrop === 'function') showBackdrop('Regenerating thumbnails...'); } catch (_) {}
+            try {
+                const response = await fetch('/api/regenerate-thumbnails', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
+                
+                if (response.ok && data.success) {
+                    const message = `Successfully regenerated thumbnails!\n\n` +
+                                  `Cache cleared: ${data.cache_cleared} files\n` +
+                                  `Thumbnails regenerated: ${data.thumbnails_regenerated} of ${data.total_images}\n` +
+                                  `Errors: ${data.errors}`;
+                    if (typeof showAlert === 'function') {
+                        showAlert(message, 'Success');
+                    } else {
+                        alert(message);
+                    }
+                    // Refresh the gallery to show updated thumbnails
+                    if (typeof fetchCurrentState === 'function') {
+                        fetchCurrentState();
+                    }
+                } else {
+                    const errorMsg = data.error || 'Failed to regenerate thumbnails';
+                    if (typeof showAlert === 'function') {
+                        showAlert(errorMsg, 'Error');
+                    } else {
+                        alert('Error: ' + errorMsg);
+                    }
+                }
+            } catch (e) {
+                try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
+                const errorMsg = 'Error regenerating thumbnails: ' + e.message;
+                if (typeof showAlert === 'function') {
+                    showAlert(errorMsg, 'Error');
+                } else {
+                    alert(errorMsg);
+                }
+                console.error('Failed to regenerate thumbnails', e);
             }
         });
     }

@@ -939,6 +939,87 @@ def update_settings():
     
     return jsonify(database['settings'])
 
+@app.route('/api/regenerate-thumbnails', methods=['POST'])
+def regenerate_thumbnails():
+    """Regenerate all thumbnails and clear cache"""
+    try:
+        # Clear the cache directory
+        cleared_count = 0
+        if os.path.exists(CACHE_FOLDER):
+            for filename in os.listdir(CACHE_FOLDER):
+                file_path = os.path.join(CACHE_FOLDER, filename)
+                if os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)
+                        cleared_count += 1
+                    except Exception as e:
+                        print(f"Error removing cache file {file_path}: {e}")
+        
+        # Get all images from database
+        database = db.get_database()
+        images = database.get('images', [])
+        
+        regenerated_count = 0
+        error_count = 0
+        
+        # Regenerate thumbnails for all images
+        for image in images:
+            original_path = image.get('path')
+            if not original_path:
+                continue
+                
+            original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
+            if not os.path.exists(original_file_path):
+                error_count += 1
+                continue
+            
+            # Generate thumbnail path
+            base_name = os.path.splitext(original_path)[0]
+            thumb_path = f"thumb_{base_name}.webp"
+            thumb_file_path = os.path.join(UPLOAD_FOLDER, thumb_path)
+            
+            try:
+                # Get image quality setting from database
+                quality = db.get_setting('image_quality', 85)
+                
+                with Image.open(original_file_path) as original_img:
+                    # Convert to RGB if image has transparency
+                    img = original_img
+                    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
+                        img = background
+                    
+                    # Use PIL's thumbnail() method - more efficient and maintains aspect ratio automatically
+                    img.thumbnail((500, 500), Image.BILINEAR)
+                    
+                    # Save as WebP
+                    img.save(thumb_file_path, format="WebP", quality=quality)
+                    
+                    # Close the final image if it's different from the original
+                    if img is not original_img:
+                        img.close()
+                    
+                    # Update database to include thumb_path
+                    db.updateImageThumbnail(original_path, thumb_path)
+                    regenerated_count += 1
+            except Exception as e:
+                print(f"Error regenerating thumbnail for {original_path}: {e}")
+                error_count += 1
+        
+        # Update timestamp to notify clients about changes
+        update_timestamp()
+        
+        return jsonify({
+            'success': True,
+            'cache_cleared': cleared_count,
+            'thumbnails_regenerated': regenerated_count,
+            'errors': error_count,
+            'total_images': len(images)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/display', methods=['POST'])
 def set_display_image():
     data = request.get_json()
