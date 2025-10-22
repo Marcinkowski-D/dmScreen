@@ -461,7 +461,33 @@ def serve_img(path):
         # Get image quality setting from database (Fix #11)
         quality = db.get_setting('image_quality', 85)
         
-        # Save to cache
+        # For crop images, serve directly from memory without caching to prevent RAM buildup
+        # Crop settings are image-specific and caching them creates persistent files that waste resources
+        if crop:
+            from io import BytesIO
+            
+            # Save image to memory buffer instead of disk
+            img_io = BytesIO()
+            img.save(img_io, format="WebP", quality=quality)
+            img_io.seek(0)
+            
+            # Close the final image
+            if img is not original_img:
+                img.close()
+            original_img.close()
+            
+            # Serve directly from memory
+            response = send_file(
+                img_io,
+                mimetype='image/webp',
+                as_attachment=False
+            )
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
+        
+        # For non-crop images, save to cache as normal
         img.save(cache_path, format="WebP", quality=quality)
         
         # Close the final image
