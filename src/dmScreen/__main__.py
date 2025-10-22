@@ -41,7 +41,7 @@ from dmScreen.cache_worker import (
 
 from dmScreen.updater import check_for_update
 
-check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
+# Update check is now called conditionally in main() based on --disable-networking flag
 
 from dmScreen.database import Database
 # Import refactored modules
@@ -66,6 +66,7 @@ from dmScreen.wifi import (
 admin_connected = False  # Track if admin has connected
 last_network_change = 0  # Track when network configuration last changed
 wifi_reconcile_event = threading.Event()  # Event-driven monitor trigger
+DISABLE_NETWORKING = False  # Flag to disable all network-related functions
 
 # Cached network status to avoid frequent system calls on polling endpoints
 NETWORK_STATUS_CACHE = {
@@ -1107,6 +1108,11 @@ def update_settings():
     
     return jsonify(database['settings'])
 
+@app.route('/api/network-status', methods=['GET'])
+def get_network_status():
+    """Return whether networking is disabled"""
+    return jsonify({'networking_enabled': not DISABLE_NETWORKING})
+
 @app.route('/api/regenerate-thumbnails', methods=['POST'])
 def regenerate_thumbnails():
     """Regenerate all thumbnails and clear cache"""
@@ -1302,38 +1308,41 @@ def _dbg(msg: str):
         except Exception:
             pass
 
-@app.route('/api/wifi/known', methods=['GET'])
-def api_wifi_known_list():
-    """Return known WiFi networks (SSIDs only; passwords are not exposed)."""
-    try:
-        nets = list_known_networks() or []
-        print(nets)
-        sanitized = [{'ssid': (n.get('ssid') or '')} for n in nets if isinstance(n, dict)]
-        return jsonify({'networks': sanitized})
-    except Exception as e:
-        _dbg(f"API /api/wifi/known Fehler: {type(e).__name__}: {e}")
-        return jsonify({'networks': []}), 200
-
-@app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
-def api_wifi_known_delete(ssid):
-    """Forget an SSID at OS level and remove its credentials from the known list."""
-    try:
-        _dbg(f"API DELETE /api/wifi/known/{ssid} ...")
-        os_removed, known_removed = forget_and_remove_known(ssid)
-        # Recompute status and notify system
+def register_wifi_api_routes(app):
+    """Register WiFi API routes for known networks (only if networking is enabled)."""
+    
+    @app.route('/api/wifi/known', methods=['GET'])
+    def api_wifi_known_list():
+        """Return known WiFi networks (SSIDs only; passwords are not exposed)."""
         try:
-            reset_admin_connection()
-        except Exception:
-            pass
-        return jsonify({
-            'success': bool(os_removed or known_removed),
-            'os_removed': bool(os_removed),
-            'known_removed': bool(known_removed),
-            'ssid': ssid
-        })
-    except Exception as e:
-        _dbg(f"API /api/wifi/known DELETE Fehler: {type(e).__name__}: {e}")
-        return jsonify({'success': False, 'error': str(e), 'ssid': ssid}), 500
+            nets = list_known_networks() or []
+            print(nets)
+            sanitized = [{'ssid': (n.get('ssid') or '')} for n in nets if isinstance(n, dict)]
+            return jsonify({'networks': sanitized})
+        except Exception as e:
+            _dbg(f"API /api/wifi/known Fehler: {type(e).__name__}: {e}")
+            return jsonify({'networks': []}), 200
+
+    @app.route('/api/wifi/known/<ssid>', methods=['DELETE'])
+    def api_wifi_known_delete(ssid):
+        """Forget an SSID at OS level and remove its credentials from the known list."""
+        try:
+            _dbg(f"API DELETE /api/wifi/known/{ssid} ...")
+            os_removed, known_removed = forget_and_remove_known(ssid)
+            # Recompute status and notify system
+            try:
+                reset_admin_connection()
+            except Exception:
+                pass
+            return jsonify({
+                'success': bool(os_removed or known_removed),
+                'os_removed': bool(os_removed),
+                'known_removed': bool(known_removed),
+                'ssid': ssid
+            })
+        except Exception as e:
+            _dbg(f"API /api/wifi/known DELETE Fehler: {type(e).__name__}: {e}")
+            return jsonify({'success': False, 'error': str(e), 'ssid': ssid}), 500
 
 
 
@@ -1396,11 +1405,25 @@ def register_wifi_routes(app, on_change=None):
 
 
 def main():
-    global db
+    global db, DISABLE_NETWORKING
     # Parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--ssid", help="Initial SSID to connect to", required=False)
+    parser.add_argument("--disable-networking", action="store_true", help="Disable all network-related functions and GUI elements")
     args = parser.parse_args()
+    
+    # Set global flag for networking
+    DISABLE_NETWORKING = args.disable_networking
+    
+    if DISABLE_NETWORKING:
+        print('################################')
+        print('NETWORKING DISABLED')
+        print('################################')
+    
+    # Conditionally check for updates
+    if not DISABLE_NETWORKING:
+        check_for_update("dmScreen", "Marcinkowski-D/dmScreen")
+    
     if args.ssid is not None:
         print('################################')
         print(args.ssid, 'given')
@@ -1423,9 +1446,12 @@ def main():
 
     print('looking if linux')
     # Start WiFi monitoring in background (only on Raspberry Pi)
-    if hasattr(os, 'uname'):
+    if not DISABLE_NETWORKING and hasattr(os, 'uname'):
         if "Raspbian" in os.uname().version:
             print('is linux!')
+            # Register WiFi API routes
+            register_wifi_api_routes(app)
+            
             # Register WiFi routes with on_change callback to reset admin connection
             register_wifi_routes(app, on_change=reset_admin_connection)
 
@@ -1434,18 +1460,25 @@ def main():
         else:
             print('not Raspberry Pi!')
     else:
-        print('not linux!')
+        if DISABLE_NETWORKING:
+            print('networking disabled, skipping WiFi setup')
+        else:
+            print('not linux!')
     
     try:
         PORT = int(os.getenv('PORT', '80'))
         # Start the server
-        lan_ip = get_lan_ip()
+        if not DISABLE_NETWORKING:
+            lan_ip = get_lan_ip()
+        else:
+            lan_ip = '127.0.0.1'
         print(f'running server on port {PORT}')
         port_part = '' if PORT == 80 else f':{PORT}'
         print(f'Local admin URL: http://127.0.0.1{port_part}/admin')
         print(f'Local view URL: http://127.0.0.1{port_part}/view')
-        print(f'Network admin URL: http://{lan_ip}{port_part}/admin')
-        print(f'Network view URL: http://{lan_ip}{port_part}/view')
+        if not DISABLE_NETWORKING:
+            print(f'Network admin URL: http://{lan_ip}{port_part}/admin')
+            print(f'Network view URL: http://{lan_ip}{port_part}/view')
         print('server listening...')
         app.run(host='0.0.0.0', port=PORT, debug=False)
     finally:

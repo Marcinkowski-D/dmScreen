@@ -299,14 +299,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start polling for updates
     startPolling();
 
-    // Check WiFi status
-    checkWifiStatus();
+    // Check networking status and conditionally initialize WiFi features
+    checkNetworkingStatus().then(networkingEnabled => {
+        if (networkingEnabled) {
+            // Check WiFi status
+            checkWifiStatus();
 
-    // Load known WiFi networks list
-    try { fetchKnownWifi(); } catch (_) {}
-    if (knownWifiRefreshBtn) {
-        knownWifiRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); try { fetchKnownWifi(); } catch (_) {} });
-    }
+            // Load known WiFi networks list
+            try { fetchKnownWifi(); } catch (_) {}
+            if (knownWifiRefreshBtn) {
+                knownWifiRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); try { fetchKnownWifi(); } catch (_) {} });
+            }
+        }
+    });
 
     // Add event listener for reset button
     resetDisplayBtn.addEventListener('click', resetDisplay);
@@ -1557,6 +1562,47 @@ async function deleteKnownWifi(ssid) {
 }
 
 // Helper functions
+async function checkNetworkingStatus() {
+    try {
+        const response = await fetch('/api/network-status');
+        const data = await response.json();
+        
+        // If networking is disabled, hide all WiFi-related elements
+        if (!data.networking_enabled) {
+            const wifiSection = document.querySelector('h2:has(+ #wifi-status)');
+            if (!wifiSection) {
+                // Fallback: find by text content
+                const h2Elements = document.querySelectorAll('h2');
+                for (const h2 of h2Elements) {
+                    if (h2.textContent.includes('WiFi')) {
+                        h2.style.display = 'none';
+                        // Hide all siblings until next h2
+                        let next = h2.nextElementSibling;
+                        while (next && next.tagName !== 'H2') {
+                            next.style.display = 'none';
+                            next = next.nextElementSibling;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                wifiSection.style.display = 'none';
+                // Hide all siblings until next h2
+                let next = wifiSection.nextElementSibling;
+                while (next && next.tagName !== 'H2') {
+                    next.style.display = 'none';
+                    next = next.nextElementSibling;
+                }
+            }
+            return false; // Networking is disabled
+        }
+        return true; // Networking is enabled
+    } catch (error) {
+        console.error('Error checking networking status:', error);
+        return true; // On error, assume networking is enabled (fail-safe)
+    }
+}
+
 async function checkWifiStatus() {
     try {
         const response = await fetch('/api/wifi/status');
