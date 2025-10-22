@@ -5,6 +5,7 @@ import socket
 import time
 import threading
 import concurrent.futures
+import queue
 from datetime import datetime
 import hashlib
 import argparse
@@ -80,6 +81,12 @@ _view_html_cache = None
 # Track last cleanup_cache() check to reduce frequency (Fix #8)
 last_cache_cleanup_check = 0
 
+# Image processing worker system
+image_processing_queue = queue.Queue()
+processing_worker_threads = []
+processing_shutdown_event = threading.Event()
+processing_lock = threading.Lock()
+
 
 def recompute_network_status():
     """Recompute and cache network status: connected, ssid, adhoc_active, and admin_url."""
@@ -124,6 +131,130 @@ def configure_wifi_wrapper(ssid, password):
     if result:
         reset_admin_connection()
     return result
+
+# Image processing worker system
+def init_image_processing(num_workers=2):
+    """Initialize the image processing worker system."""
+    global processing_worker_threads
+    
+    print(f"Starting image processing system with {num_workers} workers")
+    
+    for i in range(num_workers):
+        worker = threading.Thread(target=image_processing_worker, daemon=True, name=f"ImageProcessor-{i}")
+        worker.start()
+        processing_worker_threads.append(worker)
+    
+    print("Image processing system started")
+
+def shutdown_image_processing():
+    """Shutdown the image processing worker system."""
+    global processing_worker_threads
+    
+    print("Shutting down image processing system...")
+    
+    # Signal all worker threads to shut down
+    processing_shutdown_event.set()
+    
+    # Wait for all worker threads to finish
+    for thread in processing_worker_threads:
+        thread.join(timeout=2.0)
+    
+    print("Image processing system shut down")
+
+def image_processing_worker():
+    """Worker thread that processes images from the queue."""
+    while not processing_shutdown_event.is_set():
+        try:
+            # Get a job from the queue with a timeout
+            job = image_processing_queue.get(timeout=1.0)
+            
+            try:
+                image_id = job['image_id']
+                filepath = job['filepath']
+                filename = job['filename']
+                quality = job['quality']
+                
+                print(f"Processing image: {filename}")
+                
+                # Update status to "processing"
+                db.update_image_processing_status(image_id, 'processing')
+                
+                thumb_filename = filename
+                
+                try:
+                    # Open image and process it
+                    with Image.open(filepath) as img:
+                        # Convert to RGB if necessary
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                            if img.mode == 'P':
+                                img = img.convert('RGBA')
+                            rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                            img = rgb_img
+                        
+                        # Save the main image as WebP
+                        if filepath.lower().endswith('.webp'):
+                            img.save(filepath, format="WebP", quality=quality, method=6)
+                        else:
+                            # Get the filename without extension
+                            base_name = os.path.splitext(filepath)[0]
+                            new_filepath = f"{base_name}.webp"
+                            img.save(new_filepath, format="WebP", quality=quality, method=6)
+                            # Update the filepath and filename
+                            os.remove(filepath)
+                            filepath = new_filepath
+                            filename = os.path.basename(new_filepath)
+                        
+                        # Create thumbnail
+                        thumb_filename = f"thumb_{filename}"
+                        thumb_filepath = os.path.join(os.path.dirname(filepath), thumb_filename)
+                        
+                        # Create a copy for thumbnail
+                        thumb_img = img.copy()
+                        
+                        # Resize to maximum Full HD first (if larger)
+                        if thumb_img.size[0] > 1920 or thumb_img.size[1] > 1080:
+                            if thumb_img.size[0] > 1920:
+                                new_height = int(1920 / (thumb_img.size[0]/thumb_img.size[1]))
+                                fullhd_thumb = thumb_img.resize((1920, new_height), Image.BILINEAR)
+                                thumb_img.close()
+                                thumb_img = fullhd_thumb
+                            if thumb_img.size[1] > 1080:
+                                new_width = int(1080 * (thumb_img.size[0]/thumb_img.size[1]))
+                                fullhd_thumb = thumb_img.resize((new_width, 1080), Image.BILINEAR)
+                                thumb_img.close()
+                                thumb_img = fullhd_thumb
+                        
+                        thumb_img.thumbnail((250, 250), Image.BILINEAR)
+                        
+                        if thumb_filepath.lower().endswith('.webp'):
+                            thumb_img.save(thumb_filepath, format="WebP", quality=quality, method=6)
+                        else:
+                            base_name = os.path.splitext(thumb_filepath)[0]
+                            new_thumb_filepath = f"{base_name}.webp"
+                            thumb_img.save(new_thumb_filepath, format="WebP", quality=quality, method=6)
+                            thumb_filename = os.path.basename(new_thumb_filepath)
+                        
+                        thumb_img.close()
+                    
+                    # Update database with processed image info and status "completed"
+                    db.update_image_after_processing(image_id, filename, thumb_filename, 'completed')
+                    print(f"Image processing completed: {filename}")
+                
+                except Exception as e:
+                    print(f"Error processing image {filename}: {e}")
+                    # Update status to "failed"
+                    db.update_image_processing_status(image_id, 'failed')
+            
+            finally:
+                # Mark job as done
+                image_processing_queue.task_done()
+        
+        except queue.Empty:
+            # No jobs in the queue, just continue
+            pass
+        except Exception as e:
+            print(f"Error in image processing worker: {e}")
 
 # Configuration
 BASE_DIR = os.getcwd()
@@ -722,6 +853,33 @@ def move_image(image_id):
     
     return jsonify(result)
 
+@app.route('/api/images/processing-status', methods=['GET'])
+def get_processing_status():
+    """Get the processing status of images.
+    
+    Returns images that are pending/processing, and recently completed images.
+    Frontend can poll this endpoint to update placeholders.
+    """
+    db_data = db.get_database()
+    images = db_data.get('images', [])
+    
+    # Get images that are currently being processed or pending
+    processing_images = []
+    for img in images:
+        status = img.get('processing_status', 'completed')
+        if status in ['pending', 'processing', 'failed']:
+            processing_images.append({
+                'id': img['id'],
+                'status': status,
+                'path': img.get('path'),
+                'thumb_path': img.get('thumb_path'),
+                'name': img.get('name')
+            })
+    
+    return jsonify({
+        'processing_images': processing_images
+    })
+
 @app.route('/api/images', methods=['POST'])
 def upload_image():
     if 'files[]' not in request.files:
@@ -744,121 +902,50 @@ def upload_image():
         if not folder_exists:
             return jsonify({'error': 'Folder not found'}), 404
     
-    # Get image quality setting ONCE before thread pool (Fix #13)
-    # This avoids multiple threads calling db.get_database() simultaneously
+    # Get image quality setting
     quality = db.get_setting('image_quality', 85)
     
-    # Function to process a single image in a separate thread
-    def process_image(file_index, file):
+    # Process each file: save it and add to database with "pending" status
+    for file_index, file in enumerate(files):
         if not file or not allowed_file(file.filename):
-            return None
+            continue
             
         filename = secure_filename(file.filename)
         # Add timestamp to filename to avoid conflicts
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         filename = f"{timestamp}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        
+        # Save the file immediately
         file.save(filepath)
-        
-        thumb_filename = filename  # Default in case of failure
-        
-        # Use quality from closure (passed from outer scope)
-        
-        try:
-            # Open image once and reuse it for both processing and thumbnail creation
-            with Image.open(filepath) as img:
-                # Convert to RGB if necessary (for PNG with transparency, etc.)
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    # Convert to RGB for WebP compatibility
-                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                    if img.mode == 'P':
-                        img = img.convert('RGBA')
-                    rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                    img = rgb_img
-                
-                # Save the main image as WebP
-                if filepath.lower().endswith('.webp'):
-                    img.save(filepath, format="WebP", quality=quality, method=6)
-                else:
-                    # Get the filename without extension
-                    base_name = os.path.splitext(filepath)[0]
-                    new_filepath = f"{base_name}.webp"
-                    img.save(new_filepath, format="WebP", quality=quality, method=6)
-                    # Update the filepath and filename
-                    os.remove(filepath)  # Remove the original file
-                    filepath = new_filepath
-                    filename = os.path.basename(new_filepath)
-                
-                # Create thumbnail from the same image object (no need to reload)
-                thumb_filename = f"thumb_{filename}"
-                thumb_filepath = os.path.join(app.config['UPLOAD_FOLDER'], thumb_filename)
-                
-                # Create a copy only for thumbnail to avoid modifying the original
-                thumb_img = img.copy()
-                
-                # Resize to maximum Full HD first (if larger)
-                # This ensures thumbnails are generated from Full HD version, not original
-                if thumb_img.size[0] > 1920 or thumb_img.size[1] > 1080:
-                    # Resize to fit within Full HD bounds while maintaining aspect ratio
-                    if thumb_img.size[0] > 1920:
-                        new_height = int(1920 / (thumb_img.size[0]/thumb_img.size[1]))
-                        fullhd_thumb = thumb_img.resize((1920, new_height), Image.BILINEAR)
-                        thumb_img.close()
-                        thumb_img = fullhd_thumb
-                    if thumb_img.size[1] > 1080:
-                        new_width = int(1080 * (thumb_img.size[0]/thumb_img.size[1]))
-                        fullhd_thumb = thumb_img.resize((new_width, 1080), Image.BILINEAR)
-                        thumb_img.close()
-                        thumb_img = fullhd_thumb
-                
-                thumb_img.thumbnail((250, 250), Image.BILINEAR)
-                
-                if thumb_filepath.lower().endswith('.webp'):
-                    thumb_img.save(thumb_filepath, format="WebP", quality=quality, method=6)
-                else:
-                    # Get the filename without extension
-                    base_name = os.path.splitext(thumb_filepath)[0]
-                    new_thumb_filepath = f"{base_name}.webp"
-                    thumb_img.save(new_thumb_filepath, format="WebP", quality=quality, method=6)
-                    # Update the thumbnail filepath and filename
-                    thumb_filename = os.path.basename(new_thumb_filepath)
-                
-                # Explicitly close thumbnail to free memory immediately
-                thumb_img.close()
-                
-        except Exception as e:
-            print(f"Error processing image: {e}")
-            return None
         
         # Get name from the names list if available, otherwise use filename without extension
         name = names[file_index] if file_index < len(names) else os.path.splitext(file.filename)[0]
         
-        # Create image entry
+        # Create image entry with "pending" status
         image_id = str(uuid.uuid4())
         image_data = {
             'id': image_id,
             'name': name,
             'path': filename,
-            'thumb_path': thumb_filename,
+            'thumb_path': None,  # Will be set after processing
             'uploaded_at': datetime.now().isoformat(),
-            'parent': folder_id  # Set the parent folder ID
+            'parent': folder_id,
+            'processing_status': 'pending'
         }
         
-        return image_data
-    
-    # Process images in parallel using ThreadPoolExecutor
-    # Limit to 2 workers to prevent excessive memory usage during batch uploads
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        # Submit all image processing tasks to the executor
-        future_to_index = {executor.submit(process_image, i, file): i for i, file in enumerate(files)}
+        # Add to database immediately
+        db.appendImage(image_data)
+        uploaded_images.append(image_data)
         
-        # Collect results as they complete
-        for future in concurrent.futures.as_completed(future_to_index):
-            image_data = future.result()
-            if image_data:
-                # Add to database (this needs to be thread-safe)
-                db.appendImage(image_data)
-                uploaded_images.append(image_data)
+        # Queue for background processing
+        processing_job = {
+            'image_id': image_id,
+            'filepath': filepath,
+            'filename': filename,
+            'quality': quality
+        }
+        image_processing_queue.put(processing_job)
     
     if uploaded_images:
         return jsonify(uploaded_images), 201
@@ -1285,6 +1372,9 @@ def main():
     print('initializing background caching system')
     init_cache_system(CACHE_FOLDER, UPLOAD_FOLDER)
 
+    # Initialize image processing worker system
+    print('initializing image processing system')
+    init_image_processing(num_workers=2)
     
     # Add custom route for WiFi configuration that resets admin connection
 
@@ -1317,6 +1407,10 @@ def main():
         print('server listening...')
         app.run(host='0.0.0.0', port=PORT, debug=False)
     finally:
+        # Shutdown image processing system when server stops
+        print('shutting down image processing system')
+        shutdown_image_processing()
+        
         # Shutdown background caching system when server stops
         print('shutting down background caching system')
         shutdown_cache_system()

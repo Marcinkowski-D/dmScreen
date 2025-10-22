@@ -322,6 +322,44 @@ class Database:
                 self.save_database(db)
                 
             return updated
+    
+    def update_image_processing_status(self, image_id, status):
+        """Update the processing status of an image
+        
+        Args:
+            image_id: ID of the image to update
+            status: New status ('pending', 'processing', 'completed', 'failed')
+        """
+        with self.lock:
+            db = self.get_database()
+            
+            for image in db['images']:
+                if image['id'] == image_id:
+                    image['processing_status'] = status
+                    break
+            
+            self.save_database(db)
+    
+    def update_image_after_processing(self, image_id, new_path, new_thumb_path, status):
+        """Update image paths and status after background processing
+        
+        Args:
+            image_id: ID of the image to update
+            new_path: New path to the processed image file
+            new_thumb_path: New path to the thumbnail file
+            status: New processing status (typically 'completed')
+        """
+        with self.lock:
+            db = self.get_database()
+            
+            for image in db['images']:
+                if image['id'] == image_id:
+                    image['path'] = new_path
+                    image['thumb_path'] = new_thumb_path
+                    image['processing_status'] = status
+                    break
+            
+            self.save_database(db)
             
     def createFolder(self, folder_data):
         """Create a new folder

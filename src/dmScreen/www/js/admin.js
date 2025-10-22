@@ -1256,12 +1256,11 @@ uploadForm.addEventListener('submit', async (e) => {
         uploadButton.disabled = true;
         uploadButton.innerHTML = 'Upload Selected Images';
 
-        hideBackdrop();
+        // Don't hide backdrop yet - show processing message instead
+        showBackdrop('Bilder hochgeladen, Verarbeitung läuft...');
 
-        const savedBytes = calculateSavedBytes(files, convertedFiles);
-        showAlert('Bilder erfolgreich hochgeladen!', 'Erfolg');
-
-        fetchCurrentState();
+        // Start polling for processing status
+        startImageProcessingPolling();
 
     } catch (error) {
         // Keep disabled since the selection was cleared before upload
@@ -2628,6 +2627,68 @@ async function saveCropSettings() {
 
     } catch (error) {
         showAlert(`Error: ${error.message}`);
+    }
+}
+
+// Image processing status polling
+let processingPollingInterval = null;
+
+async function checkImageProcessingStatus() {
+    try {
+        const response = await fetch('/api/images/processing-status');
+        if (!response.ok) {
+            return;
+        }
+        
+        const data = await response.json();
+        const processingImages = data.processing_images || [];
+        
+        // If there are still images being processed, continue polling
+        if (processingImages.length > 0) {
+            const pendingCount = processingImages.filter(img => img.status === 'pending').length;
+            const processingCount = processingImages.filter(img => img.status === 'processing').length;
+            const failedCount = processingImages.filter(img => img.status === 'failed').length;
+            
+            let message = 'Bilder werden verarbeitet...';
+            if (processingCount > 0) {
+                message = `Verarbeite ${processingCount} Bild(er)...`;
+            } else if (pendingCount > 0) {
+                message = `${pendingCount} Bild(er) warten auf Verarbeitung...`;
+            }
+            
+            showBackdrop(message);
+            return true; // Still processing
+        } else {
+            // All processing complete
+            stopImageProcessingPolling();
+            hideBackdrop();
+            showAlert('Bilder erfolgreich hochgeladen und verarbeitet!', 'Erfolg');
+            fetchCurrentState();
+            return false; // Processing complete
+        }
+    } catch (error) {
+        console.error('Error checking processing status:', error);
+        return false;
+    }
+}
+
+function startImageProcessingPolling() {
+    // Clear any existing polling
+    if (processingPollingInterval) {
+        clearInterval(processingPollingInterval);
+    }
+    
+    // Start polling every 1 second
+    processingPollingInterval = setInterval(checkImageProcessingStatus, 1000);
+    
+    // Check immediately
+    checkImageProcessingStatus();
+}
+
+function stopImageProcessingPolling() {
+    if (processingPollingInterval) {
+        clearInterval(processingPollingInterval);
+        processingPollingInterval = null;
     }
 }
 
