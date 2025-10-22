@@ -1,10 +1,18 @@
 // DOM Elements
-const displayCanvas = document.getElementById('display-canvas');
+const displayCanvas1 = document.getElementById('display-canvas-1');
+const displayCanvas2 = document.getElementById('display-canvas-2');
 const imageContainer = document.getElementById('image-container');
 const ipOverlay = document.getElementById('ip-overlay');
 
-// Canvas context
-const displayCtx = displayCanvas.getContext('2d');
+// Canvas contexts
+const displayCtx1 = displayCanvas1.getContext('2d');
+const displayCtx2 = displayCanvas2.getContext('2d');
+
+// Track which canvas is currently active
+let activeCanvas = displayCanvas1;
+let activeCtx = displayCtx1;
+let inactiveCanvas = displayCanvas2;
+let inactiveCtx = displayCtx2;
 
 let INSTANCE_ID = null;
 
@@ -42,31 +50,30 @@ function drawImageContain(ctx, img, canvasWidth, canvasHeight) {
 // Add CSS for fade transitions
 const style = document.createElement('style');
 style.textContent = `
-    .fade-out {
-        opacity: 0;
-        transition: opacity 0.5s ease-out;
-    }
-    .fade-in {
+    .fade-visible {
         opacity: 1;
-        transition: opacity 0.5s ease-in;
+        transition: opacity 0.5s ease-in-out;
+    }
+    .fade-hidden {
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
     }
     .hidden {
         display: none;
     }
-    /* Prevent background visibility during image transitions */
-    #display-image {
-        background-color: black;
-    }
 `;
 document.head.appendChild(style);
 
-// Set initial state
-displayCanvas.classList.add('fade-in');
+// Set initial state - canvas 1 visible, canvas 2 hidden
+displayCanvas1.style.opacity = '1';
+displayCanvas2.style.opacity = '0';
 
 // Set canvas size to match viewport
 function resizeCanvas() {
-    displayCanvas.width = window.innerWidth;
-    displayCanvas.height = window.innerHeight;
+    displayCanvas1.width = window.innerWidth;
+    displayCanvas1.height = window.innerHeight;
+    displayCanvas2.width = window.innerWidth;
+    displayCanvas2.height = window.innerHeight;
 }
 
 // Initial resize and add event listener for window resize
@@ -221,23 +228,13 @@ function updateDisplay(forceRefresh = false) {
         imageToShow = images.find(img => img.id === settings.screensaver);
     }
 
-    // Track if we're switching from thumbnail to full image (no fade needed)
-    const isSwitchingToFullImage = displayCanvas.dataset.loadingFullImage === 'true';
-
-    if (!isSwitchingToFullImage) {
-        // Fade out the current image (unless we're just switching from thumbnail to full)
-        displayCanvas.classList.remove('fade-in');
-        displayCanvas.classList.add('fade-out');
-    } else {
-        // When switching to full image, ensure we're not in fade-out state
-        displayCanvas.classList.remove('fade-out');
-    }
+    // Track if we're switching from thumbnail to full image (no cross-fade needed)
+    const isSwitchingToFullImage = activeCanvas.dataset.loadingFullImage === 'true';
 
     // Function to load the image
     const loadImage = async () => {
         if (imageToShow) {
-            // If canvas was hidden, show it first
-            displayCanvas.classList.remove('hidden');
+            // Make sure container is visible
             imageContainer.style.display = 'flex';
 
             try {
@@ -254,33 +251,45 @@ function updateDisplay(forceRefresh = false) {
                     // Create a new Image object for the thumbnail
                     const thumbnailImg = new Image();
 
-                    // When the thumbnail loads, draw it on the canvas and fade it in
+                    // When the thumbnail loads, draw it on the inactive canvas and cross-fade
                     thumbnailImg.onload = () => {
-                        // Draw the image on the canvas
-                        drawImageContain(displayCtx, thumbnailImg, displayCanvas.width, displayCanvas.height);
+                        // Draw the image on the inactive canvas
+                        drawImageContain(inactiveCtx, thumbnailImg, inactiveCanvas.width, inactiveCanvas.height);
 
-                        // Fade in the canvas
-                        displayCanvas.classList.remove('fade-out');
-                        displayCanvas.classList.add('fade-in');
-
-                        // Mark that we're now loading the full image
-                        displayCanvas.dataset.loadingFullImage = 'true';
-
-                        // Reset transitioning state so the next updateDisplay call works
-                        isTransitioning = false;
-
-                        // After thumbnail is displayed, load the full image
+                        // Cross-fade: fade in inactive canvas
+                        inactiveCanvas.style.opacity = '1';
+                        
+                        // After transition completes, swap canvases
                         setTimeout(() => {
-                            updateDisplay();
-                        }, 100);
+                            // Fade out the now-old active canvas
+                            activeCanvas.style.opacity = '0';
+                            
+                            // Swap references
+                            const tempCanvas = activeCanvas;
+                            const tempCtx = activeCtx;
+                            activeCanvas = inactiveCanvas;
+                            activeCtx = inactiveCtx;
+                            inactiveCanvas = tempCanvas;
+                            inactiveCtx = tempCtx;
+
+                            // Mark that we're now loading the full image
+                            activeCanvas.dataset.loadingFullImage = 'true';
+
+                            // Reset transitioning state so the next updateDisplay call works
+                            isTransitioning = false;
+
+                            // After thumbnail is displayed, load the full image
+                            setTimeout(() => {
+                                updateDisplay();
+                            }, 100);
+                        }, 500); // Wait for fade transition
                     };
 
                     // Handle thumbnail load errors
                     thumbnailImg.onerror = () => {
                         console.error('Failed to load thumbnail:', thumbnailUrl);
                         // Fall back to loading the full image directly
-                        displayCanvas.dataset.loadingFullImage = 'true';
-                        // Reset transitioning state so the next updateDisplay call works
+                        activeCanvas.dataset.loadingFullImage = 'true';
                         isTransitioning = false;
                         updateDisplay();
                     };
@@ -288,7 +297,7 @@ function updateDisplay(forceRefresh = false) {
                     // Start loading the thumbnail
                     thumbnailImg.src = thumbnailUrl;
                 } else {
-                    // Now load the full-size image by fetching the URL from the server
+                    // Now load the full-size image - draw on same canvas, no cross-fade
                     const forceParam = forceRefresh ? '&force=1' : '';
                     const response = await fetch(`/api/image/${imageToShow.id}/url?crop=true&t=${Date.now()}${forceParam}`);
                     if (!response.ok) {
@@ -301,28 +310,23 @@ function updateDisplay(forceRefresh = false) {
                     // Create a new Image object for the full image
                     const fullImg = new Image();
 
-                    // When the full image loads, draw it on the canvas and complete the transition
+                    // When the full image loads, draw it on the same active canvas (replace thumbnail)
                     fullImg.onload = () => {
-                        // Draw the image on the canvas
-                        drawImageContain(displayCtx, fullImg, displayCanvas.width, displayCanvas.height);
+                        // Draw the image on the active canvas (replaces thumbnail smoothly)
+                        drawImageContain(activeCtx, fullImg, activeCanvas.width, activeCanvas.height);
 
-                        // Fade in the canvas
-                        displayCanvas.classList.remove('fade-out');
-                        displayCanvas.classList.add('fade-in');
                         isTransitioning = false;
                         // Clear the loading flag
-                        delete displayCanvas.dataset.loadingFullImage;
+                        delete activeCanvas.dataset.loadingFullImage;
                     };
 
                     // Handle full image load errors
                     fullImg.onerror = () => {
                         console.error('Failed to load image:', imageUrl);
-                        // Keep showing the thumbnail instead of showing nothing
-                        displayCanvas.classList.remove('fade-out');
-                        displayCanvas.classList.add('fade-in');
+                        // Keep showing the thumbnail
                         isTransitioning = false;
                         // Clear the loading flag
-                        delete displayCanvas.dataset.loadingFullImage;
+                        delete activeCanvas.dataset.loadingFullImage;
                     };
 
                     // Start loading the full image
@@ -331,25 +335,20 @@ function updateDisplay(forceRefresh = false) {
             } catch (error) {
                 console.error('Error fetching image URL:', error);
                 isTransitioning = false;
-                delete displayCanvas.dataset.loadingFullImage;
+                delete activeCanvas.dataset.loadingFullImage;
             }
         } else {
-            // No image to display - hide the element completely
-            displayCanvas.classList.add('hidden');
+            // No image to display - hide the container
             imageContainer.style.display = 'none';
-            // Clear the canvas
-            displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+            // Clear both canvases
+            activeCtx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+            inactiveCtx.clearRect(0, 0, inactiveCanvas.width, inactiveCanvas.height);
             isTransitioning = false;
             // Clear the loading flag
-            delete displayCanvas.dataset.loadingFullImage;
+            delete activeCanvas.dataset.loadingFullImage;
         }
     };
 
-    if (isSwitchingToFullImage || forceRefresh) {
-        // If we're just switching from thumbnail to full image, do it immediately
-        loadImage();
-    } else {
-        // Otherwise wait for fade out to complete
-        setTimeout(loadImage, 500); // Match this with the CSS transition duration
-    }
+    // Start loading immediately (no pre-fade needed with cross-fade approach)
+    loadImage();
 }

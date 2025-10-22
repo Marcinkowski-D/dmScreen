@@ -285,7 +285,7 @@ def serve_img(path):
                     img = background
                 
                 # Use PIL's thumbnail() method - more efficient and maintains aspect ratio automatically
-                img.thumbnail((250, 250), Image.BILINEAR)
+                img.thumbnail((500, 500), Image.BILINEAR)
                 
                 # Save as WebP with optimized settings
                 if file_path.lower().endswith('.webp'):
