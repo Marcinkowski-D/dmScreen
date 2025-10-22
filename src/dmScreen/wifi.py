@@ -12,6 +12,9 @@ _DATA_DIR = os.path.join(_PROJECT_ROOT, 'data')
 KNOWN_WIFI_FILE = os.path.join(_DATA_DIR, 'wifi_networks.json')
 _os_lock = Lock()
 
+# WiFi interface name
+IFACE = "wlan0"
+
 # Ensure data directory exists
 os.makedirs(_DATA_DIR, exist_ok=True)
 
@@ -355,11 +358,17 @@ def connect_network():
             if res_check.returncode == 0 and ssid in res_check.stdout:
                 _dbg(f"Verbindung '{ssid}' existiert bereits, versuche Aktivierung...")
                 res = run_cmd(['sudo', 'nmcli', 'connection', 'up', ssid])
+                # If activation failed (e.g., wrong interface), delete and recreate
+                if res.returncode != 0:
+                    _dbg(f"Aktivierung fehlgeschlagen, erstelle Verbindung neu...")
+                    run_cmd(['sudo', 'nmcli', 'connection', 'delete', ssid], check=False)
+                    res = run_cmd(['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 
+                                  'password', password, 'ifname', IFACE])
             else:
                 _dbg(f"Erstelle neue Verbindung für '{ssid}'...")
                 # Connect to WiFi network (creates connection if it doesn't exist)
                 res = run_cmd(['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 
-                              'password', password])
+                              'password', password, 'ifname', IFACE])
             
             if res.returncode == 0:
                 _dbg(f"Erfolgreich mit '{ssid}' verbunden.")

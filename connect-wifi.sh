@@ -41,7 +41,7 @@ if [ -n "$EXISTING_CONN" ]; then
         echo "[*] Aktivierung fehlgeschlagen, versuche erneute Verbindung..."
         # Lösche alte Verbindung und erstelle neu
         nmcli connection delete "$SSID" >/dev/null 2>&1 || true
-        if nmcli device wifi connect "$SSID" password "$PASS"; then
+        if nmcli device wifi connect "$SSID" password "$PASS" ifname "$IFACE"; then
             echo "[+] Erfolgreich mit \"$SSID\" verbunden (Verbindung neu erstellt)."
         else
             echo "[!] Fehler beim Verbinden mit \"$SSID\"."
@@ -51,7 +51,7 @@ if [ -n "$EXISTING_CONN" ]; then
     fi
 else
     echo "[*] Erstelle neue Verbindung für \"$SSID\"..."
-    if nmcli device wifi connect "$SSID" password "$PASS"; then
+    if nmcli device wifi connect "$SSID" password "$PASS" ifname "$IFACE"; then
         echo "[+] Erfolgreich mit \"$SSID\" verbunden."
     else
         echo "[!] Fehler beim Verbinden mit \"$SSID\"."
