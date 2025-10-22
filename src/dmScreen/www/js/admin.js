@@ -23,21 +23,131 @@ const backdrop = document.getElementById('backdrop');
 const backdropText = document.getElementById('backdrop-text');
 const newFolderBtn = document.getElementById('new-folder-btn');
 const folderSelect = document.getElementById('folder-select');
-const themeSelect = document.getElementById('theme-select');
+const primaryColorInput = document.getElementById('primary-color');
+const savePrimaryColorBtn = document.getElementById('save-primary-color');
 const adminTitleInput = document.getElementById('admin-title');
 const saveAdminTitleBtn = document.getElementById('save-admin-title');
 const pageTitleEl = document.getElementById('page-title');
 
-function applyAdminTheme(theme) {
-    try {
-        if (theme === 'light') {
-            document.body.classList.add('light');
-        } else {
-            document.body.classList.remove('light');
-        }
-    } catch (e) {
-        // no-op
+// Color utility functions
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+function rgbToHex(r, g, b) {
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+function lighten(hex, percent) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return hex;
+    
+    const r = Math.min(255, Math.round(rgb.r + (255 - rgb.r) * percent / 100));
+    const g = Math.min(255, Math.round(rgb.g + (255 - rgb.g) * percent / 100));
+    const b = Math.min(255, Math.round(rgb.b + (255 - rgb.b) * percent / 100));
+    
+    return rgbToHex(r, g, b);
+}
+
+function darken(hex, percent) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return hex;
+    
+    const r = Math.max(0, Math.round(rgb.r * (1 - percent / 100)));
+    const g = Math.max(0, Math.round(rgb.g * (1 - percent / 100)));
+    const b = Math.max(0, Math.round(rgb.b * (1 - percent / 100)));
+    
+    return rgbToHex(r, g, b);
+}
+
+function applyPrimaryColor(color) {
+    // Calculate color variations
+    const primary = color;
+    const primaryLight = lighten(color, 15);
+    const primaryDark = darken(color, 15);
+    const primaryDarker = darken(color, 30);
+    
+    // Create a style element for dynamic CSS variables
+    let styleEl = document.getElementById('dynamic-colors');
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'dynamic-colors';
+        document.head.appendChild(styleEl);
     }
+    
+    // Generate CSS with the color scheme
+    styleEl.textContent = `
+        :root {
+            --primary-color: ${primary};
+            --primary-light: ${primaryLight};
+            --primary-dark: ${primaryDark};
+            --primary-darker: ${primaryDarker};
+        }
+        
+        /* Button styles */
+        .btn {
+            background: ${primary};
+            color: #fff;
+        }
+        
+        .btn:hover {
+            background: ${primaryLight};
+        }
+        
+        .btn:active {
+            background: ${primaryDark};
+        }
+        
+        /* Active button state */
+        .btn.active,
+        button.active {
+            background: ${primaryDarker};
+        }
+        
+        .btn.active:hover,
+        button.active:hover {
+            background: ${primaryDarker};
+        }
+        
+        /* Folder path current item */
+        .folder-path-item.current-folder {
+            background-color: ${primary};
+        }
+        
+        .folder-path-item.current-folder:hover {
+            background-color: ${primary};
+        }
+        
+        /* Active gallery item border */
+        .gallery-item.active {
+            border: 2px solid ${primary};
+            box-shadow: 0 0 10px ${primary}66;
+        }
+        
+        /* Screensaver corner indicator */
+        .thumb-container.screensaver-image::before {
+            border-color: transparent ${primary} transparent transparent;
+        }
+        
+        /* Focus states for inputs */
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: ${primary};
+            box-shadow: 0 0 0 3px ${primary}33;
+        }
+        
+        /* Connected status */
+        .connected { 
+            color: ${primaryDarker}; 
+        }
+    `;
 }
 
 // Persistent list of files selected for upload (can be appended via multiple dialog opens)
@@ -206,19 +316,29 @@ document.addEventListener('DOMContentLoaded', () => {
     newFolderBtn.addEventListener('click', showCreateFolderDialog);
     folderSelect.addEventListener('change', updateUploadFolder);
 
-    // Theme switching
-    if (themeSelect) {
-        themeSelect.addEventListener('change', async () => {
-            const theme = themeSelect.value || 'dark';
-            applyAdminTheme(theme);
+    // Primary color save
+    if (savePrimaryColorBtn && primaryColorInput) {
+        savePrimaryColorBtn.addEventListener('click', async () => {
+            const primary_color = primaryColorInput.value || '#6a64ff';
+            try { if (typeof showBackdrop === 'function') showBackdrop('Applying color...'); } catch (_) {}
             try {
-                await fetch('/api/settings', {
+                const response = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ theme })
+                    body: JSON.stringify({ primary_color })
                 });
+                const data = await response.json();
+                try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
+                if (response.ok && data) {
+                    applyPrimaryColor(primary_color);
+                    if (typeof showAlert === 'function') showAlert('Color applied successfully!', 'Success');
+                } else {
+                    if (typeof showAlert === 'function') showAlert('Failed to save color', 'Error');
+                }
             } catch (e) {
-                console.error('Failed to save theme setting', e);
+                try { if (typeof hideBackdrop === 'function') hideBackdrop(); } catch (_) {}
+                if (typeof showAlert === 'function') showAlert('Error saving color', 'Error');
+                console.error('Failed to save primary color', e);
             }
         });
     }
@@ -1641,13 +1761,13 @@ function updateScreensaverOptions() {
 }
 
 function updateSettings(settings) {
-    // Apply and reflect theme
+    // Apply primary color if available
     try {
-        const theme = (settings && settings.theme) ? settings.theme : 'dark';
-        if (themeSelect) {
-            themeSelect.value = theme;
+        const primaryColor = (settings && settings.primary_color) ? settings.primary_color : '#6a64ff';
+        if (primaryColorInput) {
+            primaryColorInput.value = primaryColor;
         }
-        applyAdminTheme(theme);
+        applyPrimaryColor(primaryColor);
     } catch (_) {}
 
     // Apply Admin Title to document and UI

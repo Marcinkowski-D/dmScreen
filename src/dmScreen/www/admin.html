@@ -6,7 +6,7 @@
     <title>DM Screen Admin</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="admin-theme">
+<body>
     <div id="backdrop" class="backdrop">
         <div class="backdrop-content">
             <div class="spinner_black"></div>
@@ -179,11 +179,12 @@
                 <small>The title shown in the browser tab and as the page heading.</small>
             </div>
             <div class="form-group">
-                <label for="theme-select">Theme:</label>
-                <select id="theme-select">
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                </select>
+                <label for="primary-color">Primary Color:</label>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="color" id="primary-color" value="#6a64ff" style="width: 80px; height: 40px; cursor: pointer;">
+                    <button id="save-primary-color" class="btn">Apply Color</button>
+                </div>
+                <small>Choose a primary color for buttons and accents. Color variations will be calculated automatically.</small>
             </div>
             <div class="form-group">
                 <label>Screensaver Image:</label>
