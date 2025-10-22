@@ -287,6 +287,21 @@ def serve_img(path):
                     img.close()  # Close the copy since we're replacing it
                     img = background
                 
+                # Resize to maximum Full HD first (if larger)
+                # This ensures thumbnails are generated from Full HD version, not original
+                if img.size[0] > 1920 or img.size[1] > 1080:
+                    # Resize to fit within Full HD bounds while maintaining aspect ratio
+                    if img.size[0] > 1920:
+                        new_height = int(1920 / (img.size[0]/img.size[1]))
+                        fullhd_img = img.resize((1920, new_height), Image.BILINEAR)
+                        img.close()
+                        img = fullhd_img
+                    if img.size[1] > 1080:
+                        new_width = int(1080 * (img.size[0]/img.size[1]))
+                        fullhd_img = img.resize((new_width, 1080), Image.BILINEAR)
+                        img.close()
+                        img = fullhd_img
+                
                 # Use PIL's thumbnail() method - modifies in-place but safe since we copied
                 img.thumbnail((500, 500), Image.BILINEAR)
                 
@@ -780,6 +795,22 @@ def upload_image():
                 
                 # Create a copy only for thumbnail to avoid modifying the original
                 thumb_img = img.copy()
+                
+                # Resize to maximum Full HD first (if larger)
+                # This ensures thumbnails are generated from Full HD version, not original
+                if thumb_img.size[0] > 1920 or thumb_img.size[1] > 1080:
+                    # Resize to fit within Full HD bounds while maintaining aspect ratio
+                    if thumb_img.size[0] > 1920:
+                        new_height = int(1920 / (thumb_img.size[0]/thumb_img.size[1]))
+                        fullhd_thumb = thumb_img.resize((1920, new_height), Image.BILINEAR)
+                        thumb_img.close()
+                        thumb_img = fullhd_thumb
+                    if thumb_img.size[1] > 1080:
+                        new_width = int(1080 * (thumb_img.size[0]/thumb_img.size[1]))
+                        fullhd_thumb = thumb_img.resize((new_width, 1080), Image.BILINEAR)
+                        thumb_img.close()
+                        thumb_img = fullhd_thumb
+                
                 thumb_img.thumbnail((250, 250), Image.BILINEAR)
                 
                 if thumb_filepath.lower().endswith('.webp'):
@@ -997,6 +1028,27 @@ def regenerate_thumbnails():
                         background = Image.new('RGB', img.size, (255, 255, 255))
                         background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
                         img = background
+                    
+                    # Create a copy to avoid modifying the original
+                    if img is original_img:
+                        img = img.copy()
+                    
+                    # Resize to maximum Full HD first (if larger)
+                    # This ensures thumbnails are generated from Full HD version, not original
+                    if img.size[0] > 1920 or img.size[1] > 1080:
+                        # Resize to fit within Full HD bounds while maintaining aspect ratio
+                        if img.size[0] > 1920:
+                            new_height = int(1920 / (img.size[0]/img.size[1]))
+                            fullhd_img = img.resize((1920, new_height), Image.BILINEAR)
+                            if img is not original_img:
+                                img.close()
+                            img = fullhd_img
+                        if img.size[1] > 1080:
+                            new_width = int(1080 * (img.size[0]/img.size[1]))
+                            fullhd_img = img.resize((new_width, 1080), Image.BILINEAR)
+                            if img is not original_img:
+                                img.close()
+                            img = fullhd_img
                     
                     # Use PIL's thumbnail() method - more efficient and maintains aspect ratio automatically
                     img.thumbnail((500, 500), Image.BILINEAR)
