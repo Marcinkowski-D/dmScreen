@@ -2086,7 +2086,9 @@ async function openCropModal(imageId) {
             currentCropImageId = imageId;
 
             // Load the image into the crop preview
-            const imgUrl = `/img/${currentImageData.path}?t=${Date.now()}&w=${cropPreviewContainer.clientWidth}`;
+            // Use fixed 500px width to load the thumbnail instead of full size
+            // This prevents RAM spike and loads much faster
+            const imgUrl = `/img/${currentImageData.path}?t=${Date.now()}&w=500`;
 
             // Create a new Image object
             currentImageElement = new Image();
