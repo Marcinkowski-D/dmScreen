@@ -277,31 +277,33 @@ def serve_img(path):
             
             original_file_path = os.path.join(UPLOAD_FOLDER, original_path)
             with Image.open(original_file_path) as original_img:
+                # Always create a copy to avoid modifying the context-managed image
+                img = original_img.copy()
+                
                 # Convert to RGB if image has transparency
-                img = original_img
                 if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
                     background = Image.new('RGB', img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
+                    img.close()  # Close the copy since we're replacing it
                     img = background
                 
-                # Use PIL's thumbnail() method - more efficient and maintains aspect ratio automatically
+                # Use PIL's thumbnail() method - modifies in-place but safe since we copied
                 img.thumbnail((500, 500), Image.BILINEAR)
                 
                 # Save as WebP with optimized settings
                 if file_path.lower().endswith('.webp'):
-                    img.save(file_path, format="WebP", quality=quality)
+                    img.save(file_path, format="WebP", quality=quality, method=6)
                     new_path = path
                 else:
                     # Get the filename without extension
                     base_name = os.path.splitext(file_path)[0]
                     new_file_path = f"{base_name}.webp"
-                    img.save(new_file_path, format="WebP", quality=quality)
+                    img.save(new_file_path, format="WebP", quality=quality, method=6)
                     file_path = new_file_path
                     new_path = os.path.basename(new_file_path)
                 
-                # Close the final image if it's different from the original
-                if img is not original_img:
-                    img.close()
+                # Always close the working image
+                img.close()
                 
                 # Update database to include thumb_path
                 db.updateImageThumbnail(original_path, new_path)
@@ -748,49 +750,54 @@ def upload_image():
         # Use quality from closure (passed from outer scope)
         
         try:
+            # Open image once and reuse it for both processing and thumbnail creation
             with Image.open(filepath) as img:
-                processed_img = img.copy()
-                try:
-                    if filepath.lower().endswith('.webp'):
-                        processed_img.save(filepath, format="WebP", quality=quality)
-                    else:
-                        # Get the filename without extension
-                        base_name = os.path.splitext(filepath)[0]
-                        new_filepath = f"{base_name}.webp"
-                        processed_img.save(new_filepath, format="WebP", quality=quality)
-                        # Update the filepath and filename
-                        os.remove(filepath)  # Remove the original file
-                        filepath = new_filepath
-                        filename = os.path.basename(new_filepath)
-                finally:
-                    # Close the copied image
-                    processed_img.close()
-        except Exception as e:
-            print(f"Error processing image: {e}")
-            return None
-        
-        # Create thumbnail
-        thumb_filename = f"thumb_{filename}"
-        thumb_filepath = os.path.join(app.config['UPLOAD_FOLDER'], thumb_filename)
-        try:
-            # Open the image and create a thumbnail
-            with Image.open(filepath) as img:
-                # Use PIL's thumbnail() method with BILINEAR filter for optimal performance
-                img.thumbnail((250, 250), Image.BILINEAR)
-
+                # Convert to RGB if necessary (for PNG with transparency, etc.)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    # Convert to RGB for WebP compatibility
+                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = rgb_img
+                
+                # Save the main image as WebP
+                if filepath.lower().endswith('.webp'):
+                    img.save(filepath, format="WebP", quality=quality, method=6)
+                else:
+                    # Get the filename without extension
+                    base_name = os.path.splitext(filepath)[0]
+                    new_filepath = f"{base_name}.webp"
+                    img.save(new_filepath, format="WebP", quality=quality, method=6)
+                    # Update the filepath and filename
+                    os.remove(filepath)  # Remove the original file
+                    filepath = new_filepath
+                    filename = os.path.basename(new_filepath)
+                
+                # Create thumbnail from the same image object (no need to reload)
+                thumb_filename = f"thumb_{filename}"
+                thumb_filepath = os.path.join(app.config['UPLOAD_FOLDER'], thumb_filename)
+                
+                # Create a copy only for thumbnail to avoid modifying the original
+                thumb_img = img.copy()
+                thumb_img.thumbnail((250, 250), Image.BILINEAR)
+                
                 if thumb_filepath.lower().endswith('.webp'):
-                    img.save(thumb_filepath, format="WebP", quality=quality)
+                    thumb_img.save(thumb_filepath, format="WebP", quality=quality, method=6)
                 else:
                     # Get the filename without extension
                     base_name = os.path.splitext(thumb_filepath)[0]
                     new_thumb_filepath = f"{base_name}.webp"
-                    img.save(new_thumb_filepath, format="WebP", quality=quality)
+                    thumb_img.save(new_thumb_filepath, format="WebP", quality=quality, method=6)
                     # Update the thumbnail filepath and filename
                     thumb_filename = os.path.basename(new_thumb_filepath)
+                
+                # Explicitly close thumbnail to free memory immediately
+                thumb_img.close()
+                
         except Exception as e:
-            print(f"Error creating thumbnail: {e}")
-            # If thumbnail creation fails, use the original image path
-            thumb_filename = filename
+            print(f"Error processing image: {e}")
+            return None
         
         # Get name from the names list if available, otherwise use filename without extension
         name = names[file_index] if file_index < len(names) else os.path.splitext(file.filename)[0]
@@ -809,7 +816,8 @@ def upload_image():
         return image_data
     
     # Process images in parallel using ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    # Limit to 2 workers to prevent excessive memory usage during batch uploads
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         # Submit all image processing tasks to the executor
         future_to_index = {executor.submit(process_image, i, file): i for i, file in enumerate(files)}
         
