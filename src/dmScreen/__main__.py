@@ -95,6 +95,19 @@ processing_lock = threading.Lock()
 
 def recompute_network_status():
     """Recompute and cache network status: connected, ssid, adhoc_active, and admin_url."""
+    # Skip network status recomputation if networking is disabled
+    if DISABLE_NETWORKING:
+        port = int(os.getenv('PORT', '80'))
+        port_part = '' if port == 80 else f':{port}'
+        NETWORK_STATUS_CACHE.update({
+            'connected': False,
+            'ssid': None,
+            'adhoc_active': False,
+            'admin_url': f"http://127.0.0.1{port_part}/admin",
+            'scanned_ssids': []
+        })
+        return
+    
     ssid = None
     try:
         connected, ssid = check_wifi_connection()
