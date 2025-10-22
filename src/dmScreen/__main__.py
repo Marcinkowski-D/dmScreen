@@ -75,6 +75,10 @@ NETWORK_STATUS_CACHE = {
     'admin_url': None,
 }
 
+# Long polling support - condition variable to notify waiting clients
+update_condition = threading.Condition()
+processing_condition = threading.Condition()
+
 # Cache for view.html to avoid reading from SD-card on every request (Fix #9)
 _view_html_cache = None
 
@@ -178,6 +182,9 @@ def image_processing_worker():
                 
                 # Update status to "processing"
                 db.update_image_processing_status(image_id, 'processing')
+                # Notify long polling clients
+                with processing_condition:
+                    processing_condition.notify_all()
                 
                 thumb_filename = filename
                 
@@ -239,12 +246,18 @@ def image_processing_worker():
                     
                     # Update database with processed image info and status "completed"
                     db.update_image_after_processing(image_id, filename, thumb_filename, 'completed')
+                    # Notify long polling clients
+                    with processing_condition:
+                        processing_condition.notify_all()
                     print(f"Image processing completed: {filename}")
                 
                 except Exception as e:
                     print(f"Error processing image {filename}: {e}")
                     # Update status to "failed"
                     db.update_image_processing_status(image_id, 'failed')
+                    # Notify long polling clients
+                    with processing_condition:
+                        processing_condition.notify_all()
             
             finally:
                 # Mark job as done
@@ -285,6 +298,9 @@ def allowed_file(filename):
 def update_timestamp():
     global last_update_timestamp
     last_update_timestamp = time.time()
+    # Notify all waiting long poll requests
+    with update_condition:
+        update_condition.notify_all()
     
 def cleanup_cache(max_age=86400, max_size=150*1024*1024):  # Default: 1 day, 150MB (limit for 300MB total RAM)
     """Clean up old cache files to prevent the cache from growing too large"""
@@ -696,6 +712,16 @@ def get_current_state():
 @app.route('/api/updates', methods=['GET'])
 def check_updates():
     global last_update_timestamp, admin_connected, SERVER_INSTANCE_ID, NETWORK_STATUS_CACHE
+    
+    # Get the client's last known timestamp
+    client_timestamp = request.args.get('timestamp', type=float, default=0)
+    
+    # Long polling: wait for updates if client is up-to-date
+    if client_timestamp >= last_update_timestamp:
+        with update_condition:
+            # Wait up to 30 seconds for an update
+            update_condition.wait(timeout=30.0)
+    
     # Use cached network status to avoid frequent system calls during steady state
     try:
         recompute_network_status()
@@ -859,22 +885,38 @@ def get_processing_status():
     
     Returns images that are pending/processing, and recently completed images.
     Frontend can poll this endpoint to update placeholders.
+    Long polling: waits up to 30 seconds for status changes.
     """
-    db_data = db.get_database()
-    images = db_data.get('images', [])
+    # Get the client's last known count of processing images
+    client_count = request.args.get('count', type=int, default=-1)
     
-    # Get images that are currently being processed or pending
-    processing_images = []
-    for img in images:
-        status = img.get('processing_status', 'completed')
-        if status in ['pending', 'processing', 'failed']:
-            processing_images.append({
-                'id': img['id'],
-                'status': status,
-                'path': img.get('path'),
-                'thumb_path': img.get('thumb_path'),
-                'name': img.get('name')
-            })
+    # Helper function to get current processing images
+    def get_current_processing_images():
+        db_data = db.get_database()
+        images = db_data.get('images', [])
+        processing_images = []
+        for img in images:
+            status = img.get('processing_status', 'completed')
+            if status in ['pending', 'processing', 'failed']:
+                processing_images.append({
+                    'id': img['id'],
+                    'status': status,
+                    'path': img.get('path'),
+                    'thumb_path': img.get('thumb_path'),
+                    'name': img.get('name')
+                })
+        return processing_images
+    
+    # Get current processing images
+    processing_images = get_current_processing_images()
+    
+    # Long polling: wait if client already knows the current state
+    if client_count >= 0 and len(processing_images) == client_count:
+        with processing_condition:
+            # Wait up to 30 seconds for a change
+            processing_condition.wait(timeout=30.0)
+        # Re-fetch after wait
+        processing_images = get_current_processing_images()
     
     return jsonify({
         'processing_images': processing_images

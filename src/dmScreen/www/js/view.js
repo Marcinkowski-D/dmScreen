@@ -88,7 +88,7 @@ let settings = {
 let images = [];
 let isTransitioning = false;
 let lastUpdateTimestamp = 0;
-const POLLING_INTERVAL = 5000; // Poll every 5 seconds (reduced from 2s for Raspberry Pi 3B+)
+// Long polling is now used instead of fixed interval polling
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -99,18 +99,16 @@ document.addEventListener('DOMContentLoaded', () => {
     startPolling();
 });
 
-// Polling functions
+// Long polling functions
 function startPolling() {
-    // Initial fetch
+    // Start long polling loop
     fetchUpdates();
-
-    // Set up interval for polling
-    setInterval(fetchUpdates, POLLING_INTERVAL);
 }
 
 async function fetchUpdates() {
     try {
-        const response = await fetch('/api/updates');
+        // Long polling: pass current timestamp to server
+        const response = await fetch(`/api/updates?timestamp=${lastUpdateTimestamp}`);
         const data = await response.json();
 
         if (!INSTANCE_ID) {
@@ -141,7 +139,12 @@ async function fetchUpdates() {
         }
     } catch (error) {
         console.error('Error checking for updates:', error);
+        // Wait a bit before retrying on error
+        await new Promise(resolve => setTimeout(resolve, 5000));
     }
+    
+    // Immediately start next long poll request
+    fetchUpdates();
 }
 
 async function fetchCurrentState() {

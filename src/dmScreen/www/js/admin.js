@@ -284,7 +284,7 @@ async function showConfirm(message, title = 'Confirmation') {
 
 // Polling variables
 let lastUpdateTimestamp = 0;
-const POLLING_INTERVAL = 5000; // Poll every 5 seconds (reduced from 2s for Raspberry Pi 3B+)
+// Long polling is now used instead of fixed interval polling
 
 // Track previous network signature to detect changes
 let _prevNetworkSignature = null;
@@ -423,18 +423,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Polling functions
+// Long polling functions
 function startPolling() {
-    // Initial fetch
+    // Start long polling loop
     fetchUpdates();
-
-    // Set up interval for polling
-    setInterval(fetchUpdates, POLLING_INTERVAL);
 }
 
 async function fetchUpdates() {
     try {
-        const response = await fetch('/api/updates');
+        // Long polling: pass current timestamp to server
+        const response = await fetch(`/api/updates?timestamp=${lastUpdateTimestamp}`);
         const data = await response.json();
 
         // Detect network change signature
@@ -478,7 +476,12 @@ async function fetchUpdates() {
         }
     } catch (error) {
         console.error('Error checking for updates:', error);
+        // Wait a bit before retrying on error
+        await new Promise(resolve => setTimeout(resolve, 5000));
     }
+    
+    // Immediately start next long poll request
+    fetchUpdates();
 }
 
 async function fetchCurrentState() {
@@ -2630,66 +2633,72 @@ async function saveCropSettings() {
     }
 }
 
-// Image processing status polling
-let processingPollingInterval = null;
+// Image processing status long polling
+let processingPollingActive = false;
 
 async function checkImageProcessingStatus() {
     try {
-        const response = await fetch('/api/images/processing-status');
-        if (!response.ok) {
-            return;
-        }
+        // Get current count for long polling
+        let currentCount = -1;
         
-        const data = await response.json();
-        const processingImages = data.processing_images || [];
-        
-        // If there are still images being processed, continue polling
-        if (processingImages.length > 0) {
-            const pendingCount = processingImages.filter(img => img.status === 'pending').length;
-            const processingCount = processingImages.filter(img => img.status === 'processing').length;
-            const failedCount = processingImages.filter(img => img.status === 'failed').length;
-            
-            let message = 'Bilder werden verarbeitet...';
-            if (processingCount > 0) {
-                message = `Verarbeite ${processingCount} Bild(er)...`;
-            } else if (pendingCount > 0) {
-                message = `${pendingCount} Bild(er) warten auf Verarbeitung...`;
+        while (processingPollingActive) {
+            const response = await fetch(`/api/images/processing-status?count=${currentCount}`);
+            if (!response.ok) {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                continue;
             }
             
-            showBackdrop(message);
-            return true; // Still processing
-        } else {
-            // All processing complete
-            stopImageProcessingPolling();
-            hideBackdrop();
-            showAlert('Bilder erfolgreich hochgeladen und verarbeitet!', 'Erfolg');
-            fetchCurrentState();
-            return false; // Processing complete
+            const data = await response.json();
+            const processingImages = data.processing_images || [];
+            currentCount = processingImages.length;
+            
+            // If there are still images being processed, update UI and continue
+            if (processingImages.length > 0) {
+                const pendingCount = processingImages.filter(img => img.status === 'pending').length;
+                const processingCount = processingImages.filter(img => img.status === 'processing').length;
+                const failedCount = processingImages.filter(img => img.status === 'failed').length;
+                
+                let message = 'Bilder werden verarbeitet...';
+                if (processingCount > 0) {
+                    message = `Verarbeite ${processingCount} Bild(er)...`;
+                } else if (pendingCount > 0) {
+                    message = `${pendingCount} Bild(er) warten auf Verarbeitung...`;
+                }
+                
+                showBackdrop(message);
+                // Continue long polling loop
+            } else {
+                // All processing complete
+                stopImageProcessingPolling();
+                hideBackdrop();
+                showAlert('Bilder erfolgreich hochgeladen und verarbeitet!', 'Erfolg');
+                fetchCurrentState();
+                break;
+            }
         }
     } catch (error) {
         console.error('Error checking processing status:', error);
-        return false;
+        if (processingPollingActive) {
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            // Retry if still active
+            if (processingPollingActive) {
+                checkImageProcessingStatus();
+            }
+        }
     }
 }
 
 function startImageProcessingPolling() {
-    // Clear any existing polling
-    if (processingPollingInterval) {
-        clearInterval(processingPollingInterval);
-    }
+    // Set flag to start long polling loop
+    processingPollingActive = true;
     
-    // Start polling every 1 second
-    processingPollingInterval = setInterval(checkImageProcessingStatus, 1000);
-    
-    // Check immediately
+    // Start long polling
     checkImageProcessingStatus();
 }
 
 function stopImageProcessingPolling() {
-    if (processingPollingInterval) {
-        clearInterval(processingPollingInterval);
-        processingPollingInterval = null;
-    }
+    processingPollingActive = false;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
