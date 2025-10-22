@@ -158,6 +158,7 @@ const cropModal = document.getElementById('crop-modal');
 const cropPreviewContainer = document.getElementById('crop-preview-container');
 const cropPreviewCanvas = document.getElementById('crop-preview-canvas');
 const cropSelection = document.getElementById('crop-selection');
+const cropLoadingSpinner = document.getElementById('crop-loading-spinner');
 const mirrorHCheckbox = document.getElementById('mirror-h');
 const mirrorVCheckbox = document.getElementById('mirror-v');
 const rotate_0 = document.getElementById('rotate-0');
@@ -2070,6 +2071,9 @@ async function openCropModal(imageId) {
         // Show the modal
         cropModal.classList.add('active');
         cropPreviewCtx.clearRect(0, 0, cropPreviewCanvas.width, cropPreviewCanvas.height);
+        
+        // Show loading spinner
+        cropLoadingSpinner.classList.remove('hidden');
 
         setTimeout(() => {
             cropPreviewContainer.style.width = '95%';
@@ -2119,6 +2123,16 @@ async function openCropModal(imageId) {
 
                 // Apply transformations to the preview image
                 applyPreviewTransformations();
+                
+                // Hide loading spinner after image is loaded and displayed
+                cropLoadingSpinner.classList.add('hidden');
+            };
+            
+            // Handle image load errors
+            currentImageElement.onerror = () => {
+                // Hide loading spinner on error
+                cropLoadingSpinner.classList.add('hidden');
+                showAlert('Failed to load image for cropping.');
             };
 
             // Set the image source to start loading
