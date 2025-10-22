@@ -155,13 +155,13 @@ def update_timestamp():
     global last_update_timestamp
     last_update_timestamp = time.time()
     
-def cleanup_cache(max_age=86400, max_size=500*1024*1024):  # Default: 1 day, 500MB
+def cleanup_cache(max_age=86400, max_size=150*1024*1024):  # Default: 1 day, 150MB (limit for 300MB total RAM)
     """Clean up old cache files to prevent the cache from growing too large"""
     global last_cache_cleanup
     
-    # Only run cleanup once per hour
+    # Only run cleanup once per 30 minutes for better cache monitoring
     current_time = time.time()
-    if current_time - last_cache_cleanup < 3600:
+    if current_time - last_cache_cleanup < 1800:
         return
         
     last_cache_cleanup = current_time
@@ -239,12 +239,12 @@ def view():
 
 @app.route('/img/<path:path>')
 def serve_img(path):
-    # Run cache cleanup periodically (Fix #8: only check every 5 minutes)
+    # Run cache cleanup periodically (Fix #8: check every 3 minutes for 300MB RAM limit)
     global last_cache_cleanup_check
     current_time = time.time()
     
-    # Only check cleanup every 5 minutes instead of on every request
-    if current_time - last_cache_cleanup_check > 300:  # 300 seconds = 5 minutes
+    # Check cleanup every 3 minutes for more aggressive cache monitoring
+    if current_time - last_cache_cleanup_check > 180:  # 180 seconds = 3 minutes
         last_cache_cleanup_check = current_time
         cleanup_cache()
     

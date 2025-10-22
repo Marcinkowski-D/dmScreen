@@ -1,53 +1,71 @@
 #!/bin/bash
-# forget-wifi.sh – trennt aktuelles WLAN und entfernt dessen Block aus wpa_supplicant-wlan0.conf
+# forget-wifi.sh – trennt aktuelles WLAN und entfernt dessen Verbindung via nmcli (NetworkManager)
+# Verwendung: sudo ./forget-wifi.sh [SSID]
+# Ohne SSID-Parameter wird das aktuell verbundene WLAN vergessen
 
 IFACE="wlan0"
-WPA_IF_FILE="/etc/wpa_supplicant/wpa_supplicant-${IFACE}.conf"
+SSID="$1"
 
-[ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen."; exit 1; }
+set -o pipefail
 
-rfkill unblock wifi 2>/dev/null || true
-ip link set "$IFACE" up 2>/dev/null || true
+# Root-Check
+[ "$EUID" -eq 0 ] || { echo "[!] Bitte mit sudo ausführen."; exit 1; }
 
-# SSID ermitteln
-SSID="$(wpa_cli -i "$IFACE" status 2>/dev/null | awk -F= '/^ssid=/{print $2}')"
-[ -z "$SSID" ] && SSID="$(iwgetid -r 2>/dev/null)"
-[ -z "$SSID" ] && { echo "[!] Nicht mit einem WLAN verbunden."; exit 1; }
+# nmcli verfügbar?
+if ! command -v nmcli >/dev/null 2>&1; then
+    echo "[!] nmcli nicht gefunden. Bitte NetworkManager installieren:"
+    echo "    sudo apt-get install -y network-manager"
+    exit 1
+fi
 
-echo "[*] Trenne WLAN \"$SSID\" und entferne Zugangsdaten..."
+# Wenn keine SSID angegeben, ermittle aktuelle Verbindung
+if [ -z "$SSID" ]; then
+    # Hole aktive WiFi-Verbindung
+    SSID=$(nmcli -t -f ACTIVE,SSID dev wifi | grep '^yes:' | cut -d: -f2)
+    
+    if [ -z "$SSID" ]; then
+        echo "[!] Nicht mit einem WLAN verbunden und keine SSID angegeben."
+        echo "    Nutzung: sudo $0 [SSID]"
+        exit 1
+    fi
+    
+    echo "[*] Erkannte aktuelle Verbindung: \"$SSID\""
+fi
 
-# Disconnect + DHCP-Lease freigeben (nur wlan0)
-wpa_cli -i "$IFACE" disconnect >/dev/null 2>&1 || true
-dhclient -r "$IFACE" >/dev/null 2>&1 || true
-pkill -f "dhclient.*$IFACE" >/dev/null 2>&1 || true
-ip addr flush dev "$IFACE" 2>/dev/null || true
-nmcli connection delete "$SSID"
-nmcli connection delete $SSID
-sudo rm /etc/NetworkManager/system-connections/$SSID
-sudo rm /etc/NetworkManager/system-connections/preconfigured.nmconnection
+echo "[*] Trenne und vergesse WLAN \"$SSID\"..."
 
-# Konfig anpassen
-[ -f "$WPA_IF_FILE" ] || { echo "[!] $WPA_IF_FILE nicht gefunden."; exit 1; }
-cp "$WPA_IF_FILE" "${WPA_IF_FILE}.bak.$(date +%s)"
+# Verbindung löschen (disconnectet automatisch wenn aktiv)
+if nmcli connection delete "$SSID" 2>/dev/null; then
+    echo "[+] WLAN \"$SSID\" erfolgreich getrennt und vergessen."
+else
+    echo "[*] Verbindung \"$SSID\" nicht gefunden oder bereits gelöscht."
+    
+    # Versuche auch system-connections direkt zu löschen (falls vorhanden)
+    if [ -f "/etc/NetworkManager/system-connections/$SSID" ]; then
+        rm -f "/etc/NetworkManager/system-connections/$SSID"
+        echo "[*] Verbindungsdatei manuell entfernt."
+    elif [ -f "/etc/NetworkManager/system-connections/$SSID.nmconnection" ]; then
+        rm -f "/etc/NetworkManager/system-connections/$SSID.nmconnection"
+        echo "[*] Verbindungsdatei manuell entfernt."
+    fi
+    
+    # NetworkManager neu laden
+    nmcli connection reload 2>/dev/null || true
+fi
 
-awk -v ssid="$SSID" '
-BEGIN{inblk=0}
-{
-  if($0 ~ /^network=\{/){inblk=1; buf=$0 ORS; next}
-  if(inblk){
-    buf=buf $0 ORS
-    if($0 ~ /^\}/){
-      if(buf ~ "ssid=\""ssid"\""){next} else {printf "%s", buf}
-      inblk=0; buf=""
-    }
-    next
-  }
-  print
-}' "$WPA_IF_FILE" > "${WPA_IF_FILE}.tmp" && mv "${WPA_IF_FILE}.tmp" "$WPA_IF_FILE"
+# Entferne auch preconfigured.nmconnection falls vorhanden
+if [ -f "/etc/NetworkManager/system-connections/preconfigured.nmconnection" ]; then
+    rm -f "/etc/NetworkManager/system-connections/preconfigured.nmconnection"
+    nmcli connection reload 2>/dev/null || true
+    echo "[*] Vorkonfigurierte Verbindung entfernt."
+fi
 
-wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true
+# Interface-Status anzeigen
+WLAN_STATUS=$(nmcli -t -f DEVICE,STATE dev status | grep "^$IFACE:" | cut -d: -f2)
+echo "    wlan0 Status: ${WLAN_STATUS:-unbekannt}"
 
-WLAN_IP=$(ip -4 addr show "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
+# IP-Adresse anzeigen (falls noch vorhanden)
+WLAN_IP=$(nmcli -t -f IP4.ADDRESS dev show "$IFACE" 2>/dev/null | grep 'IP4.ADDRESS' | cut -d: -f2 | cut -d/ -f1 | head -n1)
+echo "    WLAN-IP (wlan0): ${WLAN_IP:--}"
 
-echo "[+] WLAN \"$SSID\" getrennt und vergessen."
-echo "    WLAN-IP: ${WLAN_IP:- -}"
+exit 0

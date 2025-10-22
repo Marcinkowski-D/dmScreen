@@ -63,12 +63,25 @@ current_wifi = None
 
 
 def get_lan_ip():
+    """Get IP address of wlan0 interface using nmcli or fallback to ifconfig"""
     try:
+        # Try nmcli first
+        p = run_cmd(['nmcli', '-t', '-f', 'IP4.ADDRESS', 'dev', 'show', 'wlan0'])
+        if p.returncode == 0 and p.stdout:
+            # Output format: IP4.ADDRESS[1]:192.168.1.100/24
+            for line in p.stdout.strip().split('\n'):
+                if 'IP4.ADDRESS' in line and ':' in line:
+                    ip = line.split(':', 1)[1].split('/')[0].strip()
+                    if ip:
+                        return ip
+        
+        # Fallback to ifconfig
         p = run_cmd("ifconfig | grep -A 1 wlan0 | grep -o 'inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | head -n 1", shell=True)
-        return p.stdout.strip()
+        if p.returncode == 0 and p.stdout.strip():
+            return p.stdout.strip()
     except Exception as e:
-        print(f"Error getting LAN IP address: {e}")
-        return "127.0.0.1"
+        _dbg(f"Error getting LAN IP address: {e}")
+    return "127.0.0.1"
 
 def set_target_wifi(ssid: str):
     global target_wifi
@@ -114,16 +127,51 @@ def add_known_network(ssid, password):
 
 
 def list_known_networks():
+    """List known WiFi networks from nmcli (NetworkManager stored connections).
+    Returns list of dicts with 'ssid' keys. Password is not returned for security.
+    Falls back to JSON file if nmcli is not available.
+    """
+    networks = []
+    try:
+        # Try to get WiFi connections from nmcli
+        res = run_cmd(['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'])
+        if res.returncode == 0 and res.stdout:
+            _dbg("Lese bekannte Netzwerke aus nmcli...")
+            for line in res.stdout.strip().split('\n'):
+                if ':' in line:
+                    name, conn_type = line.split(':', 1)
+                    # Filter for WiFi connections (802-11-wireless) and exclude Hotspot
+                    if conn_type == '802-11-wireless' and name != 'Hotspot':
+                        # Return format compatible with existing code (list of dicts with ssid key)
+                        # We don't return passwords as they're stored securely in nmcli
+                        networks.append({'ssid': name, 'password': ''})
+            _dbg(f"Gefundene bekannte Netzwerke via nmcli: {[n['ssid'] for n in networks]}")
+            return networks
+        else:
+            _dbg("nmcli nicht verfügbar oder keine Verbindungen gefunden, verwende JSON-Fallback")
+    except Exception as e:
+        _dbg(f"Fehler beim Lesen aus nmcli: {type(e).__name__}: {e}, verwende JSON-Fallback")
+    
+    # Fallback to JSON file if nmcli fails or is not available
     return _load_known_networks()
 
 
 def remove_known_network(ssid):
+    """Remove a known network from both nmcli and JSON storage.
+    Returns True if the network was removed, False otherwise.
+    """
+    # Remove from nmcli (NetworkManager)
+    os_removed = _forget_network_everywhere(ssid)
+    
+    # Also remove from JSON file for backwards compatibility
     networks = _load_known_networks()
     new_list = [n for n in networks if n.get('ssid') != ssid]
-    removed = len(new_list) != len(networks)
-    if removed:
+    json_removed = len(new_list) != len(networks)
+    if json_removed:
         _save_known_networks(new_list)
-    return removed
+    
+    # Return True if removed from either location
+    return os_removed or json_removed
 
 # -----------------------------
 # WiFi/OS utilities
@@ -144,11 +192,6 @@ def run_cmd(args, check=False, shell=False):
         return subprocess.CompletedProcess(args=args, returncode=1, stdout='', stderr=str(e))
 
 
-def _run_script(script_name: str, *script_args):
-    """Helper to run one of the provided WiFi/AP scripts located at project root with sudo."""
-    script_path = os.path.join(_PROJECT_ROOT, script_name)
-    cmd = ['sudo', '/bin/bash', script_path, *[str(a) for a in script_args]]
-    return run_cmd(cmd)
 
 
 
@@ -157,176 +200,114 @@ def current_ssid(force: bool = False):
 
 
 def _start_ap_services():
-    _dbg("Starte AP über Skript start-ap.sh ...")
-    _run_script('start-ap.sh')
-
-
-
-def _wpa_ping() -> bool:
-    """Return True if wpa_cli can reach wpa_supplicant (expects 'PONG')."""
-    _dbg("Prüfe Erreichbarkeit von wpa_supplicant (wpa_cli ping) ...")
-    res = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'ping'])
-    ok = (res.returncode == 0) and ('PONG' in (res.stdout or ''))
-    _dbg(f"wpa_cli ping -> {'OK' if ok else 'NICHT ERREICHBAR'}")
-    return ok
-
-
-def _ensure_wpa_running() -> bool:
-    """Make sure wpa_supplicant for wlan0 is running and its control socket is reachable."""
-    _dbg("Stelle sicher, dass wpa_supplicant für wlan0 läuft ...")
-    if _wpa_ping():
-        _dbg("wpa_supplicant bereits erreichbar.")
-        return True
-    _dbg("Versuche rfkill unblock und Interface hochzufahren ...")
-    run_cmd(['sudo', 'rfkill', 'unblock', 'all'])
-    run_cmd(['sudo', 'ifconfig', 'wlan0', 'up'])
-
-    _dbg("Starte Dienst neu: wpa_supplicant@wlan0 ...")
-    run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
-    time.sleep(1)
-    if _wpa_ping():
-        return True
-
-    _dbg("Starte generischen Dienst neu: wpa_supplicant ...")
-    run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant'])
-    time.sleep(1)
-    if _wpa_ping():
-        return True
-
-    _dbg("Starte wpa_supplicant manuell im Hintergrund ...")
-    # Use the interface-specific config common on Debian/RPi
-    run_cmd(['sudo', 'wpa_supplicant', '-B', '-i', 'wlan0', '-c', '/etc/wpa_supplicant/wpa_supplicant-wlan0.conf'])
-    time.sleep(1)
-    ok = _wpa_ping()
-    _dbg(f"wpa_supplicant manuell gestartet -> {'OK' if ok else 'FEHLER'}")
-    return ok
-
-
-def _reconfigure_wpa():
-    _dbg("wpa_cli reconfigure ...")
-    # Ensure wpa_supplicant control socket is available
+    """Start WiFi Access Point using nmcli (NetworkManager hotspot)"""
+    _dbg("Starte AP über nmcli hotspot ...")
     try:
-        _ensure_wpa_running()
-    except Exception as e:
-        _dbg(f"Fehler bei _ensure_wpa_running vor reconfigure: {type(e).__name__}: {e}")
-    res = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
-    ok = (res.returncode == 0) and ('FAIL' not in (((res.stdout or '') + ' ' + (res.stderr or '')).upper()))
-    if not ok:
-        _dbg("wpa_cli reconfigure war nicht erfolgreich – starte wpa_supplicant@wlan0 neu und versuche erneut ...")
-        run_cmd(['sudo', 'systemctl', 'restart', 'wpa_supplicant@wlan0'])
-        time.sleep(1)
-        res2 = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
-        ok2 = (res2.returncode == 0) and ('FAIL' not in (((res2.stdout or '') + ' ' + (res2.stderr or '')).upper()))
-        _dbg(f"wpa_cli reconfigure (Retry) -> {'ERFOLG' if ok2 else 'FEHLER'}")
-
-
-
-
-
-
-def _os_forget_network_wpa(ssid: str):
-    """Remove matching SSID networks from wpa_supplicant runtime and save config."""
-    try:
-        _dbg(f"Entferne SSID aus wpa_supplicant Runtime (wenn vorhanden): '{ssid}' ...")
-        res = run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'list_networks'])
-        if res.returncode != 0 or not res.stdout:
-            _dbg("Keine Netzwerke von wpa_cli list_networks erhalten – Abbruch Forget.")
+        # Default AP credentials
+        ssid = "dmscreen"
+        password = "dmscreen"
+        
+        # Stop any existing hotspot first
+        run_cmd(['sudo', 'nmcli', 'connection', 'delete', 'Hotspot'], check=False)
+        
+        # Create hotspot on wlan0
+        # nmcli device wifi hotspot ifname wlan0 ssid dmscreen password dmscreen
+        res = run_cmd(['sudo', 'nmcli', 'device', 'wifi', 'hotspot', 
+                      'ifname', 'wlan0', 'ssid', ssid, 'password', password])
+        
+        if res.returncode == 0:
+            _dbg(f"AP erfolgreich gestartet: SSID='{ssid}'")
+            time.sleep(2)  # Give it time to stabilize
+            return True
+        else:
+            _dbg(f"AP-Start fehlgeschlagen: {res.stderr}")
             return False
-        removed_ids = []
-        for line in res.stdout.splitlines():
-            line = line.strip()
-            if not line or line.lower().startswith('network id'):
-                continue
-            # wpa_cli list_networks output is tab-separated: id\tssid\tbssid\tflags
-            parts = [p for p in line.split('\t') if p != '']
-            if len(parts) < 2:
-                parts = [p for p in line.split() if p != '']
-            if len(parts) >= 2:
-                nid = parts[0].strip()
-                s = parts[1].strip()
-                if s == ssid:
-                    _dbg(f"Entferne network_id={nid} für SSID '{s}' ...")
-                    run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'remove_network', nid])
-                    removed_ids.append(nid)
-        if removed_ids:
-            _dbg(f"Speichere wpa_supplicant Konfiguration nach Entfernen: ids={removed_ids} ...")
-            run_cmd(['sudo', 'wpa_cli', '-i', 'wlan0', 'save_config'])
-            _reconfigure_wpa()
-        _dbg(f"Forget Ergebnis: removed_any={bool(removed_ids)} ids={removed_ids}")
-        return bool(removed_ids)
     except Exception as e:
-        _dbg(f"_os_forget_network_wpa Fehler: {type(e).__name__}: {e}")
+        _dbg(f"_start_ap_services Fehler: {type(e).__name__}: {e}")
         return False
 
 
-def _os_forget_network_nmcli(ssid: str):
-    """Try to delete NetworkManager connection for the SSID and remove leftover files.
-    Mirrors relevant steps from forget-wifi.sh without disconnecting current interface.
-    """
-    try:
-        if not ssid:
-            return False
-        removed_any = False
-        _dbg(f"Entferne SSID aus NetworkManager (nmcli): '{ssid}' ...")
-        # Try nmcli delete by name (ignore errors)
-        res1 = run_cmd(['sudo', 'nmcli', 'connection', 'delete', ssid])
-        removed_any = removed_any or (res1.returncode == 0)
-        # Some systems require quotes/shell; attempt again via shell to be safe
-        res1b = run_cmd(f"sudo nmcli connection delete \"{ssid}\"", shell=True)
-        removed_any = removed_any or (res1b.returncode == 0)
-        # Remove potential system-connections files; ignore errors
-        run_cmd(f"sudo rm -f /etc/NetworkManager/system-connections/{ssid}", shell=True)
-        run_cmd("sudo rm -f /etc/NetworkManager/system-connections/preconfigured.nmconnection", shell=True)
-        return removed_any
-    except Exception as e:
-        _dbg(f"_os_forget_network_nmcli Fehler: {type(e).__name__}: {e}")
-        return False
+
+
+
 
 
 
 
 def _forget_network_everywhere(ssid: str):
-    _dbg(f"Vergesse Netzwerk überall: ssid='{ssid}' ...")
+    """Remove network connection using nmcli (NetworkManager)"""
+    _dbg(f"Vergesse Netzwerk: ssid='{ssid}' ...")
     removed = False
     try:
-        if ssid:
-            # Try both NetworkManager and wpa_supplicant removal paths
-            removed = _os_forget_network_nmcli(ssid) or removed
-            removed = _os_forget_network_wpa(ssid) or removed
+        if not ssid:
+            return False
+        
+        # Get all connections with this SSID
+        res = run_cmd(['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'])
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.strip().split('\n'):
+                if ':' in line:
+                    name, conn_type = line.split(':', 1)
+                    if name == ssid or (conn_type == '802-11-wireless' and ssid in name):
+                        _dbg(f"Entferne Verbindung: '{name}'")
+                        res_del = run_cmd(['sudo', 'nmcli', 'connection', 'delete', name])
+                        if res_del.returncode == 0:
+                            removed = True
+        
+        # Also try direct delete by SSID name
+        res_direct = run_cmd(['sudo', 'nmcli', 'connection', 'delete', ssid])
+        if res_direct.returncode == 0:
+            removed = True
+        
+        # Remove potential system-connections files; ignore errors
+        run_cmd(f"sudo rm -f /etc/NetworkManager/system-connections/{ssid}", shell=True)
+        run_cmd(f"sudo rm -f /etc/NetworkManager/system-connections/{ssid}.nmconnection", shell=True)
+        run_cmd("sudo rm -f /etc/NetworkManager/system-connections/preconfigured.nmconnection", shell=True)
+        
+        _dbg(f"Vergessen abgeschlossen: removed={removed}")
     except Exception as e:
-        _dbg(f"_forget_network_everywhere Ausnahme: {type(e).__name__}: {e}")
-    _dbg(f"Vergessen abgeschlossen: removed={removed}")
+        _dbg(f"_forget_network_everywhere Fehler: {type(e).__name__}: {e}")
+    
     return removed
 
 
 def forget_and_remove_known(ssid: str):
     """Forget a network at OS level and remove its credentials from known list.
     Returns a tuple (os_removed: bool, known_removed: bool).
+    Note: remove_known_network() now calls _forget_network_everywhere() internally,
+    so this function now just delegates to it.
     """
-    os_removed = _forget_network_everywhere(ssid)
-    known_removed = remove_known_network(ssid)
-    return os_removed, known_removed
+    # remove_known_network() now handles both nmcli and JSON removal
+    removed = remove_known_network(ssid)
+    return removed, removed
 
 
 def _scan_visible_ssids():
-    """Return a set of visible SSIDs using iw or iwlist (Debian/Raspberry Pi)."""
-    _dbg("Scanne sichtbare WLANs (iw scan) ...")
-
+    """Return a list of visible SSIDs using nmcli."""
+    _dbg("Scanne sichtbare WLANs (nmcli) ...")
+    
     ssids_local = set()
-    res_local = run_cmd(['iw', 'dev', 'wlan0', 'scan'])
-    if res_local.returncode == 0 and res_local.stdout:
-        _dbg("Nutze Ergebnisse von 'iw dev wlan0 scan' ...")
-        for line in res_local.stdout.splitlines():
-            line = line.strip()
-            if line.startswith('SSID:'):
-                name = line.split('SSID:', 1)[1].strip()
-                if name:
-                    ssids_local.add(name)
-        _dbg(f"Gefundene SSIDs via iw: {sorted(list(ssids_local))}")
-    else:
-        _dbg("'iw dev wlan0 scan' lieferte keine verwertbaren Daten")
-        return None
-    return sorted(list(ssids_local))
+    try:
+        # Request a fresh scan
+        run_cmd(['sudo', 'nmcli', 'device', 'wifi', 'rescan'], check=False)
+        time.sleep(1)  # Give it time to complete
+        
+        # Get scan results
+        res = run_cmd(['nmcli', '-t', '-f', 'SSID', 'device', 'wifi', 'list'])
+        if res.returncode == 0 and res.stdout:
+            _dbg("Nutze Ergebnisse von 'nmcli device wifi list' ...")
+            for line in res.stdout.strip().split('\n'):
+                ssid = line.strip()
+                if ssid and ssid != '--':  # Filter empty or placeholder SSIDs
+                    ssids_local.add(ssid)
+            _dbg(f"Gefundene SSIDs via nmcli: {sorted(list(ssids_local))}")
+            return sorted(list(ssids_local))
+        else:
+            _dbg("'nmcli device wifi list' lieferte keine verwertbaren Daten")
+            return []
+    except Exception as e:
+        _dbg(f"_scan_visible_ssids Fehler: {type(e).__name__}: {e}")
+        return []
 
 
 
@@ -335,7 +316,7 @@ def configure_wifi(ssid, password):
     global target_wifi
     """Add credentials to list and set target ssid"""
     try:
-        _dbg(f"Konfiguriere WLAN via Skript: gewünschte SSID='{ssid}' ...")
+        _dbg(f"Konfiguriere WLAN: gewünschte SSID='{ssid}' ...")
         add_known_network(ssid, password)
         target_wifi = ssid
         return True
@@ -344,13 +325,54 @@ def configure_wifi(ssid, password):
         return False
 
 def connect_network():
+    """Connect to target WiFi network using nmcli"""
     global target_wifi, current_wifi, config_lock
+    
     with config_lock:
+        if not target_wifi:
+            _dbg("Keine Ziel-SSID gesetzt, Abbruch.")
+            return False
+        
         known_ssids = _load_known_networks()
         conf = next((s for s in known_ssids if s['ssid'] == target_wifi), None)
-        _run_script('stop-ap.sh')
-        _run_script('connect-wifi.sh', conf['ssid'], conf['password'])
-        current_wifi = target_wifi
+        
+        if not conf:
+            _dbg(f"SSID '{target_wifi}' nicht in Known-Liste gefunden.")
+            return False
+        
+        ssid = conf['ssid']
+        password = conf['password']
+        
+        _dbg(f"Verbinde mit SSID '{ssid}' via nmcli ...")
+        
+        try:
+            # Stop any hotspot first
+            _dbg("Stoppe eventuell laufenden Hotspot...")
+            run_cmd(['sudo', 'nmcli', 'connection', 'delete', 'Hotspot'], check=False)
+            
+            # Check if connection already exists
+            res_check = run_cmd(['nmcli', '-t', '-f', 'NAME', 'connection', 'show'])
+            if res_check.returncode == 0 and ssid in res_check.stdout:
+                _dbg(f"Verbindung '{ssid}' existiert bereits, versuche Aktivierung...")
+                res = run_cmd(['sudo', 'nmcli', 'connection', 'up', ssid])
+            else:
+                _dbg(f"Erstelle neue Verbindung für '{ssid}'...")
+                # Connect to WiFi network (creates connection if it doesn't exist)
+                res = run_cmd(['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 
+                              'password', password])
+            
+            if res.returncode == 0:
+                _dbg(f"Erfolgreich mit '{ssid}' verbunden.")
+                current_wifi = target_wifi
+                time.sleep(2)  # Give it time to get IP
+                return True
+            else:
+                _dbg(f"Verbindung fehlgeschlagen: {res.stderr}")
+                return False
+                
+        except Exception as e:
+            _dbg(f"connect_network Fehler: {type(e).__name__}: {e}")
+            return False
 
 def check_adhoc_network():
     global target_wifi, current_wifi
@@ -361,26 +383,37 @@ def check_wifi_connection():
     return (target_wifi is not None and target_wifi == current_wifi), current_wifi
 
 def disconnect_and_forget_current():
-
+    """Disconnect from current WiFi using nmcli, update known list, and start AP. Returns (success, ssid)."""
     global target_wifi, current_wifi, config_lock
-    """Disconnect from the currently connected WiFi using forget-wifi.sh, update known list, and start AP. Returns (success, ssid)."""
+    
     try:
         with config_lock:
-            _run_script('forget-wifi.sh')
             ssid = current_wifi
-            # Remove from known networks if present
-            if current_wifi:
+            _dbg(f"Trenne und vergesse aktuelles WLAN: '{ssid}' ...")
+            
+            # Disconnect and forget the network
+            if ssid:
+                # Forget network at OS level using nmcli
+                _forget_network_everywhere(ssid)
+                
+                # Remove from known networks list
                 try:
-                    removed_known = remove_known_network(current_wifi)
-                    _dbg(f"Entferne aus Known-Liste: ssid='{current_wifi}' -> removed={removed_known}")
+                    removed_known = remove_known_network(ssid)
+                    _dbg(f"Entferne aus Known-Liste: ssid='{ssid}' -> removed={removed_known}")
                 except Exception as e:
                     _dbg(f"Fehler beim Entfernen aus Known-Liste: {type(e).__name__}: {e}")
+            
             current_wifi = None
+            target_wifi = None
+            
             # Start AP so user can reconnect/configure
+            _dbg("Starte AP-Modus nach Disconnect...")
             _start_ap_services()
             time.sleep(2)
+            
             _dbg("Disconnect abgeschlossen.")
-        return True, ssid
+            return True, ssid
+            
     except Exception as e:
         _dbg(f"disconnect_and_forget_current error: {type(e).__name__}: {e}")
         return False, None
@@ -394,38 +427,56 @@ def wifi_monitor(ssid=None):
     global target_wifi, current_wifi, change_callback, known_ssids, scanned_ssids
     """Background thread to ensure connectivity: connect to known networks, else start AP"""
     _dbg("WiFi-Monitor gestartet – prüfe regelmäßig die Verbindung ...")
+    
+    # Wait for initial scan to complete
     scanned_ssids = _scan_visible_ssids()
-    while scanned_ssids is None or len(scanned_ssids) == 0:
-        time.sleep(1)
+    retry_count = 0
+    while len(scanned_ssids) == 0 and retry_count < 10:
+        _dbg(f"Warte auf WLAN-Scan-Ergebnisse... (Versuch {retry_count + 1}/10)")
+        time.sleep(2)
         scanned_ssids = _scan_visible_ssids()
+        retry_count += 1
+    
+    if len(scanned_ssids) == 0:
+        _dbg("Keine WLANs gefunden nach mehreren Versuchen, fahre trotzdem fort...")
+    
     known_ssids = _load_known_networks()
 
     if ssid is not None:
+        # SSID was provided (probably from command line), use it
         target_wifi = ssid
         current_wifi = ssid
-
+        _dbg(f"Verwende vorgegebene SSID: '{ssid}'")
     else:
+        # Try to find a known network in the scan results
         for k_ssid in known_ssids:
             if k_ssid['ssid'] in scanned_ssids:
                 target_wifi = k_ssid['ssid']
+                _dbg(f"Bekanntes WLAN gefunden: '{target_wifi}'")
                 break
 
     while True:
-        if target_wifi is None and current_wifi is not None:
-            disconnect_and_forget_current()
-            if change_callback:
-                try:
-                    change_callback()
-                except Exception:
-                    pass
+        try:
+            if target_wifi is None and current_wifi is not None:
+                _dbg("Ziel-WLAN ist None, aber aktuell verbunden -> Disconnect")
+                disconnect_and_forget_current()
+                if change_callback:
+                    try:
+                        change_callback()
+                    except Exception:
+                        pass
 
-        if target_wifi is not None and current_wifi != target_wifi:
-            connect_network()
-            if change_callback:
-                try:
-                    change_callback()
-                except Exception:
-                    pass
+            if target_wifi is not None and current_wifi != target_wifi:
+                _dbg(f"Verbinde zu Ziel-WLAN: '{target_wifi}'")
+                connect_network()
+                if change_callback:
+                    try:
+                        change_callback()
+                    except Exception:
+                        pass
+        except Exception as e:
+            _dbg(f"WiFi-Monitor Fehler in Hauptschleife: {type(e).__name__}: {e}")
+        
         time.sleep(10)  # Increased from 1 to 10 seconds to reduce CPU load on Raspberry Pi 3B+
 
 
